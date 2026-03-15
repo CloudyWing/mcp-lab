@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+LICENSE.md
+*.md
+
+# Environment and config
+.env
+.env.*
+
+# Docker
+docker-compose*.yml
+compose.yml
+Dockerfile
+.dockerignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist/
+build/
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+*.suo
+
+# System
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Logs and temporary
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Other directories
+volumes/
+backups/
+secrets/

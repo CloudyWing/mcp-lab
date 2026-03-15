@@ -1,0 +1,30 @@
+services:
+  mcp-reader:
+    container_name: mcp-reader
+    build:
+      context: .
+      args:
+        PYTHON_TAG: ${PYTHON_TAG:-3.12-slim}
+    extends:
+      file: ../../policies/base.yml
+      service: default-policy
+    ports:
+      - "${MCP_READER_PORT:-9840}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      MAX_IMAGES: ${DOCUMENT_MAX_IMAGES:-20}
+      MAX_TEXT_MB: ${DOCUMENT_MAX_TEXT_MB:-10}
+      DOCUMENT_HOST_MOUNT_ROOT: ${DOCUMENT_HOST_MOUNT_ROOT:?Set DOCUMENT_HOST_MOUNT_ROOT}
+    volumes:
+      - ${DOCUMENT_HOST_MOUNT_ROOT:?Set DOCUMENT_HOST_MOUNT_ROOT}:/host_root:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - shared_net

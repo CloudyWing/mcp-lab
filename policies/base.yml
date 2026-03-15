@@ -1,0 +1,12 @@
+services:
+  default-policy:
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      TZ: ${TZ}

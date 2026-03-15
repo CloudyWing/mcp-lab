@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/datastores/" />
+  <Folder Name="/datastores/elastic/">
+    <Project Path="datastores/elastic/McpLab.Elastic.csproj" />
+  </Folder>
+  <Folder Name="/datastores/oracle/">
+    <Project Path="datastores/oracle/McpLab.Oracle.csproj" />
+  </Folder>
+  <Folder Name="/datastores/redis/">
+    <Project Path="datastores/redis/McpLab.Redis.csproj" />
+  </Folder>
+  <Folder Name="/datastores/sqlserver/">
+    <Project Path="datastores/sqlserver/McpLab.SqlServer.csproj" />
+  </Folder>
+  <Folder Name="/messaging/" />
+  <Folder Name="/messaging/mosquitto/">
+    <Project Path="messaging/mosquitto/McpLab.Mosquitto.csproj" />
+  </Folder>
+  <Folder Name="/messaging/rabbitmq/">
+    <Project Path="messaging/rabbitmq/McpLab.RabbitMq.csproj" />
+  </Folder>
+</Solution>

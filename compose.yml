@@ -1,0 +1,26 @@
+name: ${COMPOSE_PROJECT_NAME:-mcp-lab}
+
+include:
+  # Datastores
+  - path: datastores/sqlserver/compose.yml
+    env_file: .env
+  - path: datastores/oracle/compose.yml
+    env_file: .env
+  - path: datastores/elastic/compose.yml
+    env_file: .env
+  - path: datastores/redis/compose.yml
+    env_file: .env
+
+  # Messaging
+  - path: messaging/mosquitto/compose.yml
+    env_file: .env
+  - path: messaging/rabbitmq/compose.yml
+    env_file: .env
+
+  # Documents
+  - path: documents/reader/compose.yml
+    env_file: .env
+
+networks:
+  shared_net:
+    name: ${COMPOSE_PROJECT_NAME:-mcp-lab}_shared_net

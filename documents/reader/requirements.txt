@@ -1,0 +1,12 @@
+mcp>=1.0.0
+uvicorn>=0.30.0
+starlette
+sse-starlette
+httpx
+pymupdf
+python-pptx
+python-docx
+openpyxl
+Pillow
+chardet
+pytesseract

@@ -1,0 +1,64 @@
+# =========================
+# Environment & Secrets
+# =========================
+.env
+
+# =========================
+# System & OS
+# =========================
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+**/volumes/
+
+# =========================
+# IDEs & Editors
+# =========================
+.vscode/
+.idea/
+.powershell/
+.vs/
+
+# =========================
+# .NET / C#
+# =========================
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+
+# =========================
+# Temporary files
+# =========================
+tmp/
+temp/
+*.tmp
+*.swp
+*.bak
+*~
