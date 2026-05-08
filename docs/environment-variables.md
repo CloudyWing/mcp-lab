@@ -103,5 +103,17 @@
 | `DOCUMENT_HOST_MOUNT_ROOT` | `` | 容器可讀取的單一 host 掛載根目錄 |
 | `DOCUMENT_MAX_IMAGES` | `20` | 圖片最大回傳張數 |
 | `DOCUMENT_MAX_TEXT_MB` | `10` | 文字內容最大回傳大小（MB），設為 `0` 表示不限制 |
+| `DOCUMENT_LIST_DEFAULT_LIMIT` | `100` | `list_documents` 預設最大回傳檔案數 |
+| `DOCUMENT_LIST_MAX_LIMIT` | `1000` | `list_documents` 允許的最大回傳檔案數 |
+| `DOCUMENT_LIST_DEFAULT_DEPTH` | `2` | `list_documents` 遞迴列舉時的預設深度 |
+| `DOCUMENT_LIST_MAX_DEPTH` | `10` | `list_documents` 遞迴列舉時允許的最大深度 |
+| `DOCUMENT_SEARCH_DEFAULT_LIMIT` | `20` | `search_documents` 預設最大回傳結果數 |
+| `DOCUMENT_SEARCH_MAX_LIMIT` | `200` | `search_documents` 允許的最大回傳結果數 |
+| `DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT` | `200` | `search_documents` 預設最大掃描檔案數 |
+| `DOCUMENT_SEARCH_MAX_SCAN_LIMIT` | `2000` | `search_documents` 允許的最大掃描檔案數 |
+| `DOCUMENT_XLSX_MAX_ROWS` | `1000` | `read_document` 讀取 XLSX 時的預設最大列數 |
+| `DOCUMENT_XLSX_MAX_ROWS_LIMIT` | `10000` | `read_document` 讀取 XLSX 時允許的最大列數 |
+| `DOCUMENT_XLSX_MAX_CELLS` | `20000` | `read_document` 讀取 XLSX 時的預設最大儲存格數 |
+| `DOCUMENT_XLSX_MAX_CELLS_LIMIT` | `200000` | `read_document` 讀取 XLSX 時允許的最大儲存格數 |
 
 

@@ -8,6 +8,7 @@ import chardet
 import json
 import os
 import re
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +17,39 @@ from mcp.server.fastmcp import FastMCP
 MOUNT_ROOT = Path("/host_root").resolve()
 RAW_HOST_MOUNT_ROOT = os.environ.get("DOCUMENT_HOST_MOUNT_ROOT", "/").strip()
 
-MAX_IMAGES    = int(os.environ.get("MAX_IMAGES", 20))
-MAX_TEXT_MB   = float(os.environ.get("MAX_TEXT_MB", 10))
+
+def _get_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_float_env(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_IMAGES = _get_int_env("MAX_IMAGES", 20)
+MAX_TEXT_MB = _get_float_env("MAX_TEXT_MB", 10)
+DEFAULT_LIST_LIMIT = _get_int_env("DOCUMENT_LIST_DEFAULT_LIMIT", 100)
+MAX_LIST_LIMIT = _get_int_env("DOCUMENT_LIST_MAX_LIMIT", 1000)
+DEFAULT_LIST_DEPTH = _get_int_env("DOCUMENT_LIST_DEFAULT_DEPTH", 2)
+MAX_LIST_DEPTH = _get_int_env("DOCUMENT_LIST_MAX_DEPTH", 10)
+DEFAULT_SEARCH_LIMIT = _get_int_env("DOCUMENT_SEARCH_DEFAULT_LIMIT", 20)
+MAX_SEARCH_LIMIT = _get_int_env("DOCUMENT_SEARCH_MAX_LIMIT", 200)
+DEFAULT_SEARCH_SCAN_LIMIT = _get_int_env("DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT", 200)
+MAX_SEARCH_SCAN_LIMIT = _get_int_env("DOCUMENT_SEARCH_MAX_SCAN_LIMIT", 2000)
+DEFAULT_XLSX_MAX_ROWS = _get_int_env("DOCUMENT_XLSX_MAX_ROWS", 1000)
+MAX_XLSX_MAX_ROWS = _get_int_env("DOCUMENT_XLSX_MAX_ROWS_LIMIT", 10000)
+DEFAULT_XLSX_MAX_CELLS = _get_int_env("DOCUMENT_XLSX_MAX_CELLS", 20000)
+MAX_XLSX_MAX_CELLS = _get_int_env("DOCUMENT_XLSX_MAX_CELLS_LIMIT", 200000)
 
 DOCUMENT_EXTS = {".pdf", ".pptx", ".docx", ".xlsx"}
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".svg"}
-TEXT_EXTS     = {".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log", ".ini", ".toml"}
+TEXT_EXTS     = {".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log", ".ini", ".toml", ".html"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTS | IMAGE_EXTS | TEXT_EXTS
 
 mcp = FastMCP(
@@ -42,6 +70,17 @@ def _normalize_mount_root(raw_root: str) -> str:
 
 
 HOST_MOUNT_ROOT = _normalize_mount_root(RAW_HOST_MOUNT_ROOT)
+
+
+def _clamp_int(value: int, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    if parsed < minimum:
+        return default
+    return min(parsed, maximum)
 
 
 def _map_host_path(source_path: str) -> Path | None:
@@ -107,6 +146,62 @@ def _candidate_host_path(file_path: Path) -> str:
         return _relative_path_for(file_path)
     except Exception:
         return str(file_path)
+
+
+def _file_category(file_path: Path) -> str:
+    ext = file_path.suffix.lower()
+    if ext in DOCUMENT_EXTS:
+        return "document"
+    if ext in IMAGE_EXTS:
+        return "image"
+    return "text"
+
+
+def _document_file_info(file_path: Path) -> dict:
+    return {
+        "name":     file_path.name,
+        "path":     _relative_path_for(file_path),
+        "type":     file_path.suffix.lstrip(".").lower(),
+        "category": _file_category(file_path),
+        "size_kb":  round(file_path.stat().st_size / 1024, 1),
+    }
+
+
+def _list_supported_files(target: Path, recursive: bool, max_depth: int, limit: int) -> tuple[list[dict], bool, bool]:
+    if target.is_file():
+        if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            return [], False, False
+        return [_document_file_info(target)], False, False
+
+    if not target.is_dir():
+        return [], False, False
+
+    files: list[dict] = []
+    depth_limited = False
+    queue = deque([(target, 0)])
+
+    while queue:
+        current, depth = queue.popleft()
+
+        try:
+            entries = sorted(current.iterdir(), key=lambda item: item.name.lower())
+        except OSError:
+            continue
+
+        for entry in entries:
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_EXTENSIONS:
+                if len(files) >= limit:
+                    return files, True, depth_limited
+                files.append(_document_file_info(entry))
+                continue
+
+            if recursive and entry.is_dir() and not entry.is_symlink():
+                if depth < max_depth:
+                    queue.append((entry, depth + 1))
+                else:
+                    depth_limited = True
+
+    return files, False, depth_limited
 
 
 def _find_path_candidates(raw_path: str, limit: int = 10) -> list[str]:
@@ -233,19 +328,43 @@ def _parse_docx(path: Path, include_images: bool) -> dict:
     return {"type": "docx", "paragraphs": paragraphs, "tables": tables, "images": images_b64}
 
 
-def _parse_xlsx(path: Path) -> dict:
+def _parse_xlsx(path: Path, max_rows: int, max_cells: int) -> dict:
     from openpyxl import load_workbook
 
     wb = load_workbook(str(path), data_only=True)
+    total_sheet_count = len(wb.sheetnames)
     sheets = []
+    total_rows = 0
+    total_cells = 0
+    truncated = False
+
     for name in wb.sheetnames:
         ws = wb[name]
         rows = []
         for row in ws.iter_rows(values_only=True):
+            if total_rows >= max_rows or total_cells + len(row) > max_cells:
+                truncated = True
+                break
+
             rows.append([str(c) if c is not None else "" for c in row])
+            total_rows += 1
+            total_cells += len(row)
+
         sheets.append({"sheet": name, "rows": rows})
+
+        if truncated:
+            break
+
     wb.close()
-    return {"type": "xlsx", "sheet_count": len(sheets), "sheets": sheets, "images": []}
+    return {
+        "type": "xlsx",
+        "sheet_count": total_sheet_count,
+        "returned_sheet_count": len(sheets),
+        "returned_rows": total_rows,
+        "truncated": truncated,
+        "sheets": sheets,
+        "images": [],
+    }
 
 
 def _parse_image(path: Path) -> dict:
@@ -364,30 +483,45 @@ def resolve_document_path(path: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
-def list_documents(subpath: str = ".", recursive: bool = True) -> list[dict]:
-    """列出掛載根目錄下可讀取的檔案清單，subpath 可傳完整 Windows/WSL 路徑或掛載根下相對路徑。"""
+def list_documents(
+    subpath: str = ".",
+    recursive: bool = False,
+    limit: int = DEFAULT_LIST_LIMIT,
+    max_depth: int = DEFAULT_LIST_DEPTH,
+) -> dict:
+    """列出掛載根目錄下可讀取的檔案清單，預設不遞迴且有回傳上限。"""
 
-    target = _resolve_path(subpath)
+    safe_limit = _clamp_int(limit, DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT)
+    safe_depth = _clamp_int(max_depth, DEFAULT_LIST_DEPTH, 0, MAX_LIST_DEPTH)
+    response = {
+        "subpath": subpath,
+        "host_mount_root": HOST_MOUNT_ROOT,
+        "recursive": recursive,
+        "max_depth": safe_depth if recursive else 0,
+        "limit": safe_limit,
+        "exists": False,
+        "returned_count": 0,
+        "depth_limited": False,
+        "truncated": False,
+        "files": [],
+    }
+
+    try:
+        target = _resolve_path(subpath)
+    except ValueError as exc:
+        response["error"] = str(exc)
+        return response
+
     if not target.exists():
-        return []
+        return response
 
-    iterator = target.rglob("*") if recursive else target.glob("*")
-    files = []
-    for file_path in iterator:
-        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            category = (
-                "document" if file_path.suffix.lower() in DOCUMENT_EXTS
-                else "image" if file_path.suffix.lower() in IMAGE_EXTS
-                else "text"
-            )
-            files.append({
-                "name":     file_path.name,
-                "path":     _relative_path_for(file_path),
-                "type":     file_path.suffix.lstrip(".").lower(),
-                "category": category,
-                "size_kb":  round(file_path.stat().st_size / 1024, 1),
-            })
-    return sorted(files, key=lambda item: item["path"])
+    files, truncated, depth_limited = _list_supported_files(target, recursive, safe_depth, safe_limit)
+    response["exists"] = True
+    response["returned_count"] = len(files)
+    response["depth_limited"] = depth_limited
+    response["truncated"] = truncated or depth_limited
+    response["files"] = files
+    return response
 
 
 @mcp.tool()
@@ -396,6 +530,8 @@ def read_document(
     include_images: bool = True,
     start_page: int = 1,
     end_page: int = 0,
+    xlsx_max_rows: int = DEFAULT_XLSX_MAX_ROWS,
+    xlsx_max_cells: int = DEFAULT_XLSX_MAX_CELLS,
 ) -> str:
     """讀取文件、圖片或文字檔，path 可傳完整 Windows/WSL 路徑或掛載根下相對路徑。
     start_page / end_page 僅適用於 PDF 和 PPTX（1-based，end_page=0 表示讀到末頁）。
@@ -421,7 +557,9 @@ def read_document(
         elif ext == ".docx":
             result = _parse_docx(file_path, include_images)
         elif ext == ".xlsx":
-            result = _parse_xlsx(file_path)
+            safe_rows = _clamp_int(xlsx_max_rows, DEFAULT_XLSX_MAX_ROWS, 1, MAX_XLSX_MAX_ROWS)
+            safe_cells = _clamp_int(xlsx_max_cells, DEFAULT_XLSX_MAX_CELLS, 1, MAX_XLSX_MAX_CELLS)
+            result = _parse_xlsx(file_path, safe_rows, safe_cells)
         elif ext in IMAGE_EXTS:
             result = _parse_image(file_path)
         else:
@@ -447,14 +585,59 @@ def read_document_text_only(
 
 
 @mcp.tool()
-def search_documents(keyword: str, subpath: str = ".") -> list[dict]:
-    """在指定路徑下搜尋包含關鍵字的檔案（僅搜尋文字內容）"""
+def search_documents(
+    keyword: str,
+    subpath: str = ".",
+    recursive: bool = True,
+    limit: int = DEFAULT_SEARCH_LIMIT,
+    max_files_scanned: int = DEFAULT_SEARCH_SCAN_LIMIT,
+    max_depth: int = DEFAULT_LIST_DEPTH,
+    include_image_ocr: bool = False,
+) -> dict:
+    """在指定路徑下搜尋包含關鍵字的檔案，預設限制掃描數量且不做圖片 OCR。"""
+    safe_limit = _clamp_int(limit, DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT)
+    safe_scan_limit = _clamp_int(max_files_scanned, DEFAULT_SEARCH_SCAN_LIMIT, 1, MAX_SEARCH_SCAN_LIMIT)
+    safe_depth = _clamp_int(max_depth, DEFAULT_LIST_DEPTH, 0, MAX_LIST_DEPTH)
+    response = {
+        "keyword": keyword,
+        "subpath": subpath,
+        "recursive": recursive,
+        "max_depth": safe_depth if recursive else 0,
+        "limit": safe_limit,
+        "max_files_scanned": safe_scan_limit,
+        "scanned_count": 0,
+        "returned_count": 0,
+        "truncated": False,
+        "results": [],
+    }
+
+    if not keyword.strip():
+        response["error"] = "Keyword is required."
+        return response
+
+    listing = list_documents(
+        subpath=subpath,
+        recursive=recursive,
+        limit=safe_scan_limit,
+        max_depth=safe_depth,
+    )
+
+    if "error" in listing:
+        response["error"] = listing["error"]
+        return response
+
     results = []
-    for doc in list_documents(subpath):
+    for doc in listing["files"]:
+        if doc.get("category") == "image" and not include_image_ocr:
+            continue
+
+        response["scanned_count"] += 1
+
         try:
             content = json.loads(read_document_text_only(doc["path"]))
         except Exception:
             continue
+
         text_blob = json.dumps(content, ensure_ascii=False)
         if keyword.lower() in text_blob.lower():
             results.append({
@@ -462,7 +645,15 @@ def search_documents(keyword: str, subpath: str = ".") -> list[dict]:
                 "type":     doc["type"],
                 "category": doc.get("category", ""),
             })
-    return results
+
+            if len(results) >= safe_limit:
+                response["truncated"] = True
+                break
+
+    response["returned_count"] = len(results)
+    response["truncated"] = response["truncated"] or listing.get("truncated", False)
+    response["results"] = results
+    return response
 
 
 if __name__ == "__main__":

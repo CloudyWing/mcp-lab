@@ -123,9 +123,16 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 
 ### 大檔說明
 
-- PDF / PPTX / DOCX / XLSX 沒有額外內容大小上限；真正常見的限制是 MCP client 或終端顯示。
+- PDF / PPTX / DOCX / XLSX 的常見限制是 MCP client 或終端顯示。
 - 純文字檔才受 `DOCUMENT_MAX_TEXT_MB` 控制；設為 `0` 表示不限制。
-- 若回應太大，優先用 `start_page` / `end_page` 分段讀 PDF、PPTX，而不是把文件能力限制掉。
+- 若回應太大，優先用 `start_page` / `end_page` 分段讀 PDF、PPTX。
+- XLSX 讀取預設限制列數與儲存格數，避免一次回傳整本大型工作簿。
+
+### 列舉與搜尋限制
+
+`list_documents` 預設不遞迴列舉，並限制最大回傳筆數；回應中會包含 `returned_count`、`depth_limited` 與 `truncated`，用來判斷是否仍有未回傳的候選檔案。需要掃描子目錄時，明確傳入 `recursive=true`、`max_depth` 與 `limit`。
+
+`search_documents` 會限制掃描檔案數與回傳結果數，預設不對圖片執行 OCR 搜尋。若搜尋結果回傳 `truncated=true`，請縮小 `subpath`、提高限制值，或改用更精確的檔名前綴搭配 `resolve_document_path`。
 
 ### 啟動注意事項
 
@@ -137,8 +144,8 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 | 類型 | 副檔名 |
 | --- | --- |
 | 辦公室文件 | `.pdf`, `.docx`, `.pptx`, `.xlsx` |
-| 圖片 | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.svg` |
-| 文字 | `.txt`, `.md`, `.log`, `.csv`, `.json`, `.yaml`, `.toml`, `.ini`, `.xml`, `.html` |
+| 圖片 | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.tiff`, `.tif`, `.svg` |
+| 文字 | `.txt`, `.md`, `.log`, `.csv`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.xml`, `.html` |
 
 圖片讀取使用 Pillow 萃取 EXIF 與尺寸資訊；若系統安裝 Tesseract（容器已內建），另可提取 OCR 文字（支援繁中、簡中、英文）。
 
@@ -148,10 +155,10 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 | --- | --- |
 | `get_document_root` | 查詢目前掛載根目錄與支援格式清單 |
 | `resolve_document_path` | 驗證指定路徑是否可讀，或回傳同目錄下符合前綴的候選完整路徑 |
-| `list_documents` | 以完整 Windows/WSL 路徑或相對路徑列出可讀取檔案 |
+| `list_documents` | 以完整 Windows/WSL 路徑或相對路徑列出可讀取檔案，預設不遞迴且有回傳上限 |
 | `read_document` | 以完整 Windows/WSL 路徑或相對路徑讀取指定檔案（含圖片） |
 | `read_document_text_only` | 僅讀取文字內容 |
-| `search_documents` | 在指定 Windows/WSL 路徑下依關鍵字全文搜尋 |
+| `search_documents` | 在指定 Windows/WSL 路徑下依關鍵字搜尋，限制掃描數與回傳結果數 |
 
 ## AI 工具設定
 
