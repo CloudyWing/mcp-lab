@@ -75,6 +75,10 @@ public sealed partial class ConnectionRegistry {
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
+            if (!HasConfiguredConnection(cfg, "name", "host", "password", "database")) {
+                continue;
+            }
+
             string host = (cfg.GetValueOrDefault("host") ?? "").Trim();
 
             string name = (cfg.GetValueOrDefault("name") ?? "").Trim();
@@ -123,6 +127,9 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
+
+    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
+        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^REDIS_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

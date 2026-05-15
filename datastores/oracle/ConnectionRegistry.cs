@@ -68,6 +68,10 @@ public sealed partial class ConnectionRegistry {
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
+            if (!HasConfiguredConnection(cfg, "name", "host", "service", "user", "password")) {
+                continue;
+            }
+
             string host = (cfg.GetValueOrDefault("host") ?? "").Trim();
             string service = (cfg.GetValueOrDefault("service") ?? "").Trim();
 
@@ -118,6 +122,9 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
+
+    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
+        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^ORACLE_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

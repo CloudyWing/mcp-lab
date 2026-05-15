@@ -26,7 +26,7 @@ Dockerfile
 *~
 
 # Python
-__pycache__
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -34,18 +34,18 @@ __pycache__
 *.so
 *.egg
 *.egg-info
-dist/
-build/
-.pytest_cache
-.mypy_cache
+**/dist/
+**/build/
+**/.pytest_cache/
+**/.mypy_cache/
 .coverage
 htmlcov/
 
 # .NET
-bin/
-obj/
+**/bin/
+**/obj/
 *.user
-.vs/
+**/.vs/
 *.suo
 
 # System
