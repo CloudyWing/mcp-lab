@@ -8,5 +8,10 @@ services:
         max-file: "3"
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     environment:
       TZ: ${TZ}
