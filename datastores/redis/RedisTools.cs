@@ -20,13 +20,13 @@ public sealed class RedisTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 Redis 連線")]
     public string ListConnections() =>
-        JsonSerializer.Serialize(
+        ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
                 host = kv.Value.Host,
                 port = kv.Value.Port,
                 database = kv.Value.Database,
-            }), JsonCompact
+            })
         );
 
     /// <summary>
@@ -41,9 +41,11 @@ public sealed class RedisTools {
             IDatabase db = mux.GetDatabase();
             TimeSpan latency = await db.PingAsync();
 
-            return $"OK: {latency.TotalMilliseconds:F1}ms";
+            return ToolResponse.Ok(new {
+                latency_ms = latency.TotalMilliseconds,
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -70,9 +72,11 @@ public sealed class RedisTools {
                 }
             }
 
-            return keys.Count > 0 ? string.Join("\n", keys) : "No keys found.";
+            return keys.Count > 0
+                ? ToolResponse.Ok(keys)
+                : ToolResponse.Empty("No keys found.", keys);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -88,32 +92,34 @@ public sealed class RedisTools {
             IDatabase db = mux.GetDatabase();
             RedisType type = await db.KeyTypeAsync(key);
 
-            string result = type switch {
+            object result = type switch {
                 RedisType.String =>
                     (await db.StringGetAsync(key)).ToString() ?? "(nil)",
                 RedisType.List =>
-                    JsonSerializer.Serialize((await db.ListRangeAsync(key)).Select(v => v.ToString()).ToArray()),
+                    (await db.ListRangeAsync(key)).Select(v => v.ToString()).ToArray(),
                 RedisType.Set =>
-                    JsonSerializer.Serialize((await db.SetMembersAsync(key)).Select(v => v.ToString()).ToArray()),
+                    (await db.SetMembersAsync(key)).Select(v => v.ToString()).ToArray(),
                 RedisType.SortedSet =>
-                    JsonSerializer.Serialize(
-                        (await db.SortedSetRangeByScoreWithScoresAsync(key))
-                            .Select(e => new { member = e.Element.ToString(), score = e.Score })
-                            .ToArray()
-                    ),
+                    (await db.SortedSetRangeByScoreWithScoresAsync(key))
+                        .Select(e => new { member = e.Element.ToString(), score = e.Score })
+                        .ToArray(),
                 RedisType.Hash
-                    => JsonSerializer.Serialize(
-                        (await db.HashGetAllAsync(key))
-                            .ToDictionary(e => e.Name.ToString(), e => e.Value.ToString())
-                    ),
+                    => (await db.HashGetAllAsync(key))
+                        .ToDictionary(e => e.Name.ToString(), e => e.Value.ToString()),
                 RedisType.None => "Key does not exist.",
                 _ => $"Unknown type: {type}",
             };
             mux.Dispose();
 
-            return result;
+            return type == RedisType.None
+                ? ToolResponse.Empty("Key does not exist.")
+                : ToolResponse.Ok(new {
+                    key,
+                    type = type.ToString().ToLowerInvariant(),
+                    value = result,
+                });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -130,9 +136,12 @@ public sealed class RedisTools {
             IDatabase db = mux.GetDatabase();
             RedisType keyType = await db.KeyTypeAsync(key);
 
-            return keyType.ToString().ToLowerInvariant();
+            return ToolResponse.Ok(new {
+                key,
+                type = keyType.ToString().ToLowerInvariant(),
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -150,12 +159,16 @@ public sealed class RedisTools {
             TimeSpan? ttl = await db.KeyTimeToLiveAsync(key);
 
             if (ttl is null) {
-                return "Key does not exist.";
+                return ToolResponse.Empty("Key does not exist.");
             }
 
-            return ttl == TimeSpan.MinValue ? "No expiry." : $"{ttl.Value.TotalSeconds:F0} seconds";
+            return ToolResponse.Ok(new {
+                key,
+                ttl_seconds = ttl == TimeSpan.MinValue ? (double?)null : ttl.Value.TotalSeconds,
+                has_expiry = ttl != TimeSpan.MinValue,
+            }, ttl == TimeSpan.MinValue ? "No expiry." : "TTL returned.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -172,9 +185,12 @@ public sealed class RedisTools {
             IServer server = mux.GetServers().First();
             IGrouping<string, KeyValuePair<string, string>>[] info = await server.InfoAsync(section);
 
-            return string.Join("\n", info.SelectMany(g => g.Select(kv => $"{kv.Key}: {kv.Value}")));
+            return ToolResponse.Ok(info.ToDictionary(
+                group => group.Key,
+                group => group.ToDictionary(kv => kv.Key, kv => kv.Value)
+            ));
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -190,7 +206,7 @@ public sealed class RedisTools {
     ) {
         try {
             if (!RedisToolLimits.IsSetKeyTtlValid(ttlSeconds)) {
-                return "Error: TTL seconds must be zero or greater.";
+                return ToolResponse.Error("TTL seconds must be zero or greater.");
             }
 
             using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
@@ -202,9 +218,12 @@ public sealed class RedisTools {
                 await db.StringSetAsync(key, value);
             }
 
-            return ttlSeconds > 0 ? $"SET {key} (TTL={ttlSeconds}s)" : $"SET {key}";
+            return ToolResponse.Ok(new {
+                key,
+                ttl_seconds = ttlSeconds > 0 ? (int?)ttlSeconds : null,
+            }, "Key set.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -223,16 +242,18 @@ public sealed class RedisTools {
                 .ToArray();
 
             if (keyList.Length == 0) {
-                return "Error: At least one key is required.";
+                return ToolResponse.Error("At least one key is required.");
             }
 
             using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             long deleted = await db.KeyDeleteAsync(keyList);
 
-            return $"{deleted} key(s) deleted.";
+            return ToolResponse.Ok(new {
+                deleted,
+            }, "Keys deleted.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -247,16 +268,21 @@ public sealed class RedisTools {
     ) {
         try {
             if (!RedisToolLimits.IsExpireTtlValid(ttlSeconds)) {
-                return "Error: TTL seconds must be greater than zero.";
+                return ToolResponse.Error("TTL seconds must be greater than zero.");
             }
 
             using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             bool ok = await db.KeyExpireAsync(key, TimeSpan.FromSeconds(ttlSeconds));
 
-            return ok ? $"Expire set to {ttlSeconds}s." : "Key does not exist.";
+            return ok
+                ? ToolResponse.Ok(new {
+                    key,
+                    ttl_seconds = ttlSeconds,
+                }, "Expiry set.")
+                : ToolResponse.Empty("Key does not exist.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 }

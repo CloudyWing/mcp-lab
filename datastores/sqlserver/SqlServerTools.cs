@@ -9,7 +9,6 @@ public sealed class SqlServerTools {
     private const int MaxQueryTimeoutSeconds = 300;
     private const int DefaultMaxRows = 500;
     private const int MaxResultRows = 5000;
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
     /// <summary>
@@ -40,14 +39,14 @@ public sealed class SqlServerTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 SQL Server 連線")]
     public string ListConnections() =>
-        JsonSerializer.Serialize(
+        ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
                 host = kv.Value.Host,
                 port = kv.Value.Port,
                 user = kv.Value.User,
                 default_database = kv.Value.Database,
-            }), Json
+            })
         );
 
     /// <summary>
@@ -62,9 +61,11 @@ public sealed class SqlServerTools {
             using SqlCommand cmd = new("SELECT @@VERSION", conn) { CommandTimeout = 10 };
             string ver = cmd.ExecuteScalar()?.ToString() ?? "";
 
-            return $"OK: {ver[..Math.Min(120, ver.Length)]}";
+            return ToolResponse.Ok(new {
+                version = ver[..Math.Min(120, ver.Length)],
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -90,9 +91,11 @@ public sealed class SqlServerTools {
                 names.Add(rdr.GetString(0));
             }
 
-            return names.Count > 0 ? string.Join("\n", names) : "No databases found.";
+            return names.Count > 0
+                ? ToolResponse.Ok(names)
+                : ToolResponse.Empty("No databases found.", names);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -122,9 +125,11 @@ public sealed class SqlServerTools {
                 rows.Add($"{rdr[0]}.{rdr[1]}");
             }
 
-            return rows.Count > 0 ? string.Join("\n", rows) : "No tables found.";
+            return rows.Count > 0
+                ? ToolResponse.Ok(rows)
+                : ToolResponse.Empty("No tables found.", rows);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -167,9 +172,11 @@ public sealed class SqlServerTools {
                 lines.Add($"{rdr[0]}: {typeName} {(rdr.GetString(2) == "YES" ? "NULL" : "NOT NULL")}");
             }
 
-            return lines.Count > 0 ? string.Join("\n", lines) : "Table not found.";
+            return lines.Count > 0
+                ? ToolResponse.Ok(lines)
+                : ToolResponse.Empty("Table not found.", lines);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -197,7 +204,7 @@ public sealed class SqlServerTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return RunQuery(sql, database, connection);
@@ -207,7 +214,7 @@ public sealed class SqlServerTools {
         string upper = sql.TrimStart().ToUpperInvariant();
 
         if (!upper.StartsWith("SELECT") && !upper.StartsWith("WITH")) {
-            return "Error: 僅允許 SELECT / WITH 查詢。";
+            return ToolResponse.Error("僅允許 SELECT / WITH 查詢。");
         }
 
         try {
@@ -217,11 +224,11 @@ public sealed class SqlServerTools {
             using SqlCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
             using SqlDataReader rdr = cmd.ExecuteReader();
 
-            return FormatResultSet(rdr);
+            return ToolResponse.Ok(ReadResultSet(rdr));
         } catch (InvalidOperationException ex) {
-            return $"Blocked: {ex.Message}";
+            return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -252,7 +259,7 @@ public sealed class SqlServerTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return RunExecute(sql, database, connection);
@@ -269,16 +276,18 @@ public sealed class SqlServerTools {
 
             if (upper.StartsWith("SELECT") || upper.StartsWith("WITH")) {
                 using SqlDataReader rdr = cmd.ExecuteReader();
-                return FormatResultSet(rdr);
+                return ToolResponse.Ok(ReadResultSet(rdr));
             }
 
             int affected = cmd.ExecuteNonQuery();
 
-            return affected >= 0 ? $"{affected} row(s) affected." : "Command executed successfully.";
+            return ToolResponse.Ok(new {
+                affected_rows = affected >= 0 ? (int?)affected : null,
+            }, affected >= 0 ? "Command affected rows." : "Command executed successfully.");
         } catch (InvalidOperationException ex) {
-            return $"Blocked: {ex.Message}";
+            return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -325,27 +334,28 @@ public sealed class SqlServerTools {
         return value;
     }
 
-    private static string FormatResultSet(SqlDataReader rdr) {
-        StringBuilder sb = new();
+    private static object ReadResultSet(SqlDataReader rdr) {
         int max = MaxRows;
         string[] cols = Enumerable.Range(0, rdr.FieldCount).Select(i => rdr.GetName(i)).ToArray();
-
-        sb.AppendLine(string.Join(" | ", cols));
-        sb.AppendLine(string.Join(" | ", cols.Select(_ => "---")));
+        List<IReadOnlyList<string>> rows = [];
 
         int count = 0;
 
         while (rdr.Read() && count < max) {
-            sb.AppendLine(string.Join(" | ",
+            rows.Add(
                 Enumerable.Range(0, rdr.FieldCount)
-                    .Select(i => rdr.IsDBNull(i) ? "NULL" : rdr[i]?.ToString() ?? "")));
+                    .Select(i => rdr.IsDBNull(i) ? "NULL" : rdr[i]?.ToString() ?? "")
+                    .ToArray()
+            );
             count++;
         }
 
-        if (count == max) {
-            sb.Append($"... (truncated to {max} rows)");
-        }
-
-        return sb.ToString().TrimEnd();
+        return new {
+            columns = cols,
+            rows,
+            returned_count = rows.Count,
+            truncated = count == max,
+            max_rows = max,
+        };
     }
 }

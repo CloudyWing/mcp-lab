@@ -5,7 +5,6 @@ namespace CloudyWing.McpLab.Mosquitto;
 /// </summary>
 [McpServerToolType]
 public sealed class MqttTools {
-    private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
     /// <summary>
@@ -20,13 +19,13 @@ public sealed class MqttTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 MQTT 連線")]
     public string ListConnections() =>
-        JsonSerializer.Serialize(
+        ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
                 host = kv.Value.Host,
                 port = kv.Value.Port,
                 user = kv.Value.User,
-            }), JsonCompact);
+            }));
 
     /// <summary>
     /// 測試 MQTT Broker 連線是否正常（訂閱測試 topic 以驗證 broker 實際處理協定）
@@ -52,14 +51,16 @@ public sealed class MqttTools {
                     or MqttClientSubscribeResultCode.GrantedQoS2;
 
                 return ok
-                    ? $"OK: Broker acknowledged subscription (result={rc})."
-                    : $"Error: Broker denied subscription ({rc}).";
+                    ? ToolResponse.Ok(new {
+                        result = rc.ToString(),
+                    }, "Broker acknowledged subscription.")
+                    : ToolResponse.Error($"Broker denied subscription ({rc}).");
             } finally {
                 await client.DisconnectAsync();
                 client.Dispose();
             }
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -94,9 +95,13 @@ public sealed class MqttTools {
             await client.DisconnectAsync();
             client.Dispose();
 
-            return $"Published to '{topic}' (qos={qos}, retain={retain})";
+            return ToolResponse.Ok(new {
+                topic,
+                qos,
+                retain,
+            }, "Message published.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -136,10 +141,10 @@ public sealed class MqttTools {
             client.Dispose();
 
             return messages.Count > 0
-                ? JsonSerializer.Serialize(messages, JsonCompact)
-                : "No message received within timeout.";
+                ? ToolResponse.Ok(messages)
+                : ToolResponse.Empty("No message received within timeout.", messages);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -182,11 +187,13 @@ public sealed class MqttTools {
                 .Where(kv => interestKeys.Any(k => kv.Key.Contains(k)))
                 .OrderBy(kv => kv.Key);
 
-            return filtered.Any()
-                ? string.Join("\n", filtered.Select(kv => $"{kv.Key}: {kv.Value}"))
-                : "No stats available (broker may not expose $SYS).";
+            Dictionary<string, string> output = filtered.ToDictionary(kv => kv.Key, kv => kv.Value);
+
+            return output.Count > 0
+                ? ToolResponse.Ok(output)
+                : ToolResponse.Empty("No stats available (broker may not expose $SYS).", output);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 }

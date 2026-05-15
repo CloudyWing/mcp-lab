@@ -1,4 +1,5 @@
 using CloudyWing.McpLab.RabbitMq;
+using CloudyWing.McpLab.Shared;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -17,5 +18,6 @@ builder.Services
     .WithTools<RabbitMqTools>();
 
 WebApplication app = builder.Build();
+app.MapMcpHealth("mcp-rabbitmq");
 app.MapMcp("/mcp");
 await app.RunAsync();

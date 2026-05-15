@@ -7,7 +7,6 @@ namespace CloudyWing.McpLab.Elastic;
 public sealed class ElasticTools {
     private const int DefaultSearchSize = 10;
     private const int MaxSearchSize = 1000;
-    private static readonly JsonSerializerOptions JsonPretty = new() { WriteIndented = true };
     private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private static readonly string[] Value = ["*"];
     private readonly ConnectionRegistry registry;
@@ -32,9 +31,9 @@ public sealed class ElasticTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 Elasticsearch 連線")]
     public string ListConnections() =>
-        JsonSerializer.Serialize(
+        ToolResponse.Ok(
             registry.All.Select(kv => new { name = kv.Key, url = kv.Value.Url, user = kv.Value.User }),
-            JsonCompact
+            "Configured Elasticsearch connections."
         );
 
     /// <summary>
@@ -51,9 +50,12 @@ public sealed class ElasticTools {
             string name = node?["cluster_name"]?.ToString() ?? "";
             string ver = node?["version"]?["number"]?.ToString() ?? "";
 
-            return $"OK: cluster={name} version={ver}";
+            return ToolResponse.Ok(new {
+                cluster = name,
+                version = ver,
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -68,18 +70,21 @@ public sealed class ElasticTools {
             using HttpClient http = registry.CreateClient(connection);
             string body = await http.GetStringAsync("/_cat/indices?format=json&s=index");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
-            List<string> lines = [];
+            List<object> indices = [];
 
-            foreach (var item in arr) {
-                lines.Add(
-                    $"{item?["index"]}  docs={item?["docs.count"]}  size={item?["store.size"]}"
-                );
+            foreach (JsonNode? item in arr) {
+                indices.Add(new {
+                    index = item?["index"]?.ToString(),
+                    docs = item?["docs.count"]?.ToString(),
+                    size = item?["store.size"]?.ToString(),
+                });
             }
 
-            return lines.Count > 0
-                ? string.Join("\n", lines) : "No indices found.";
+            return indices.Count > 0
+                ? ToolResponse.Ok(indices)
+                : ToolResponse.Empty("No indices found.", indices);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -95,9 +100,9 @@ public sealed class ElasticTools {
             using HttpClient http = registry.CreateClient(connection);
             string body = await http.GetStringAsync($"/{Uri.EscapeDataString(index)}/_mapping");
 
-            return JsonSerializer.Serialize(JsonNode.Parse(body), JsonPretty);
+            return ToolResponse.Ok(JsonNode.Parse(body));
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -112,9 +117,9 @@ public sealed class ElasticTools {
             using HttpClient http = registry.CreateClient(connection);
             string body = await http.GetStringAsync("/_cluster/health");
 
-            return JsonSerializer.Serialize(JsonNode.Parse(body), JsonPretty);
+            return ToolResponse.Ok(JsonNode.Parse(body));
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -144,7 +149,7 @@ public sealed class ElasticTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(queryBodyBase64, out string queryBody, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return await RunSearch(index, queryBody, size, connection);
@@ -169,25 +174,31 @@ public sealed class ElasticTools {
             string responseBody = await resp.Content.ReadAsStringAsync();
 
             if (!resp.IsSuccessStatusCode) {
-                return $"Error: {resp.StatusCode} — {responseBody}";
+                return ToolResponse.Error(
+                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
+                    ParseJsonOrText(responseBody)
+                );
             }
 
             JsonNode? root = JsonNode.Parse(responseBody);
-            string total = root?["hits"]?["total"]?["value"]?.ToString() ?? "?";
+            string total = root?["hits"]?["total"]?["value"]?.ToString() ?? "0";
             JsonArray hits = root?["hits"]?["hits"]?.AsArray() ?? [];
-            List<string> output = [$"Total: {total}"];
+            List<object> output = [];
 
             foreach (JsonNode? hit in hits) {
-                output.Add(JsonSerializer.Serialize(new {
+                output.Add(new {
                     _id = hit?["_id"]?.ToString(),
                     _score = hit?["_score"]?.ToString(),
                     _source = hit?["_source"],
-                }, JsonCompact));
+                });
             }
 
-            return string.Join("\n", output);
+            return ToolResponse.Ok(new {
+                total,
+                hits = output,
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -217,7 +228,7 @@ public sealed class ElasticTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(documentBase64, out string document, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return await RunIndexDocument(index, document, id, connection);
@@ -237,11 +248,16 @@ public sealed class ElasticTools {
             });
             string body = await resp.Content.ReadAsStringAsync();
 
-            return resp.IsSuccessStatusCode ? body : $"Error: {resp.StatusCode} — {body}";
+            return resp.IsSuccessStatusCode
+                ? ToolResponse.Ok(ParseJsonOrText(body), "Document indexed.")
+                : ToolResponse.Error(
+                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
+                    ParseJsonOrText(body)
+                );
         } catch (JsonException) {
-            return "Error: Invalid JSON document.";
+            return ToolResponse.Error("Invalid JSON document.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -260,9 +276,14 @@ public sealed class ElasticTools {
                 $"/{Uri.EscapeDataString(index)}/_doc/{Uri.EscapeDataString(id)}");
             string body = await resp.Content.ReadAsStringAsync();
 
-            return resp.IsSuccessStatusCode ? body : $"Error: {resp.StatusCode} — {body}";
+            return resp.IsSuccessStatusCode
+                ? ToolResponse.Ok(ParseJsonOrText(body), "Document deleted.")
+                : ToolResponse.Error(
+                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
+                    ParseJsonOrText(body)
+                );
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -292,7 +313,7 @@ public sealed class ElasticTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(queryBodyBase64, out string queryBody, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return await RunDeleteByQuery(index, queryBody, connection);
@@ -307,11 +328,16 @@ public sealed class ElasticTools {
                 new StringContent(queryBody, Encoding.UTF8, "application/json"));
             string body = await resp.Content.ReadAsStringAsync();
 
-            return resp.IsSuccessStatusCode ? body : $"Error: {resp.StatusCode} — {body}";
+            return resp.IsSuccessStatusCode
+                ? ToolResponse.Ok(ParseJsonOrText(body), "Delete by query completed.")
+                : ToolResponse.Error(
+                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
+                    ParseJsonOrText(body)
+                );
         } catch (InvalidOperationException ex) {
-            return $"Blocked: {ex.Message}";
+            return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -365,6 +391,7 @@ public sealed class ElasticTools {
         }
 
         string safeDecoded = decoded.Length <= 500 ? decoded : decoded[..500] + "...";
+        safeDecoded = SensitiveDataSanitizer.Redact(safeDecoded);
         Console.WriteLine($"[base64] raw={raw}");
         Console.WriteLine($"[base64] normalized={normalized}");
         Console.WriteLine($"[base64] decoded={safeDecoded}");
@@ -385,5 +412,13 @@ public sealed class ElasticTools {
         }
 
         return value;
+    }
+
+    private static object? ParseJsonOrText(string body) {
+        try {
+            return JsonNode.Parse(body);
+        } catch (JsonException) {
+            return SensitiveDataSanitizer.Redact(body);
+        }
     }
 }

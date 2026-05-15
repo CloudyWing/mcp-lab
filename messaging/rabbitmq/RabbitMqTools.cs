@@ -5,8 +5,6 @@ namespace CloudyWing.McpLab.RabbitMq;
 /// </summary>
 [McpServerToolType]
 public sealed class RabbitMqTools {
-    private static readonly JsonSerializerOptions JsonPretty = new() { WriteIndented = true };
-    private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
     /// <summary>
@@ -21,13 +19,13 @@ public sealed class RabbitMqTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 RabbitMQ 連線")]
     public string ListConnections() {
-        return JsonSerializer.Serialize(
+        return ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
                 host = kv.Value.Host,
                 mgmt_port = kv.Value.MgmtPort,
                 user = kv.Value.User,
-            }), JsonCompact
+            })
         );
     }
 
@@ -44,9 +42,12 @@ public sealed class RabbitMqTools {
             string body = await http.GetStringAsync("api/whoami");
             JsonNode? node = JsonNode.Parse(body);
 
-            return $"OK: user={node?["name"]} tags={node?["tags"]}";
+            return ToolResponse.Ok(new {
+                user = node?["name"]?.ToString(),
+                tags = node?["tags"],
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -63,15 +64,21 @@ public sealed class RabbitMqTools {
 
             string body = await http.GetStringAsync($"api/queues/{Uri.EscapeDataString(vhost)}");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
-            List<string> lines = [];
+            List<object> queues = [];
 
             foreach (JsonNode? q in arr) {
-                lines.Add($"{q?["name"]}  messages={q?["messages"]}  consumers={q?["consumers"]}");
+                queues.Add(new {
+                    name = q?["name"]?.ToString(),
+                    messages = q?["messages"]?.ToString(),
+                    consumers = q?["consumers"]?.ToString(),
+                });
             }
 
-            return lines.Count > 0 ? string.Join("\n", lines) : "No queues found.";
+            return queues.Count > 0
+                ? ToolResponse.Ok(queues)
+                : ToolResponse.Empty("No queues found.", queues);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -88,19 +95,25 @@ public sealed class RabbitMqTools {
 
             string body = await http.GetStringAsync($"api/exchanges/{Uri.EscapeDataString(vhost)}");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
-            List<string> lines = [];
+            List<object> exchanges = [];
 
             foreach (JsonNode? exNode in arr) {
                 string name = exNode?["name"]?.ToString() ?? string.Empty;
 
                 if (!string.IsNullOrEmpty(name)) {
-                    lines.Add($"{name}  type={exNode?["type"]}  durable={exNode?["durable"]}");
+                    exchanges.Add(new {
+                        name,
+                        type = exNode?["type"]?.ToString(),
+                        durable = exNode?["durable"]?.ToString(),
+                    });
                 }
             }
 
-            return lines.Count > 0 ? string.Join("\n", lines) : "No exchanges found.";
+            return exchanges.Count > 0
+                ? ToolResponse.Ok(exchanges)
+                : ToolResponse.Empty("No exchanges found.", exchanges);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -121,7 +134,7 @@ public sealed class RabbitMqTools {
             );
             JsonNode? node = JsonNode.Parse(body);
 
-            var summary = new {
+            object summary = new {
                 name = node?["name"]?.ToString(),
                 messages = node?["messages"]?.ToString(),
                 consumers = node?["consumers"]?.ToString(),
@@ -131,9 +144,9 @@ public sealed class RabbitMqTools {
                 message_stats = node?["message_stats"],
             };
 
-            return JsonSerializer.Serialize(summary, JsonPretty);
+            return ToolResponse.Ok(summary);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -150,7 +163,7 @@ public sealed class RabbitMqTools {
             string body = await http.GetStringAsync("api/overview");
             JsonNode? node = JsonNode.Parse(body);
 
-            var summary = new {
+            object summary = new {
                 cluster_name = node?["cluster_name"]?.ToString(),
                 rabbitmq_version = node?["rabbitmq_version"]?.ToString(),
                 erlang_version = node?["erlang_version"]?.ToString(),
@@ -159,9 +172,9 @@ public sealed class RabbitMqTools {
                 object_totals = node?["object_totals"],
             };
 
-            return JsonSerializer.Serialize(summary, JsonPretty);
+            return ToolResponse.Ok(summary);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -191,9 +204,12 @@ public sealed class RabbitMqTools {
                 new StringContent(payload, Encoding.UTF8, "application/json"));
             resp.EnsureSuccessStatusCode();
 
-            return $"Published to exchange='{exchange}' routing_key='{routingKey}'";
+            return ToolResponse.Ok(new {
+                exchange,
+                routing_key = routingKey,
+            }, "Message published.");
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 }

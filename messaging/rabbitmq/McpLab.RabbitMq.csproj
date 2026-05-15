@@ -14,4 +14,8 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <!-- RabbitMQ Management API is accessed via HTTP; no AMQP SDK required -->
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
+  </ItemGroup>
 </Project>

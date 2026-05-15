@@ -2,10 +2,12 @@ ARG DOTNET_TAG=10.0
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_TAG} AS build
 WORKDIR /src
 COPY Directory.Packages.props .
-COPY messaging/mosquitto/McpLab.Mosquitto.csproj .
-RUN dotnet restore McpLab.Mosquitto.csproj
-COPY messaging/mosquitto/. .
-RUN dotnet publish McpLab.Mosquitto.csproj -c Release -o /app --no-restore
+COPY shared/McpLab.Shared/McpLab.Shared.csproj shared/McpLab.Shared/
+COPY messaging/mosquitto/McpLab.Mosquitto.csproj messaging/mosquitto/
+RUN dotnet restore messaging/mosquitto/McpLab.Mosquitto.csproj
+COPY shared/McpLab.Shared/. shared/McpLab.Shared/
+COPY messaging/mosquitto/. messaging/mosquitto/
+RUN dotnet publish messaging/mosquitto/McpLab.Mosquitto.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_TAG}
 RUN apt-get update \

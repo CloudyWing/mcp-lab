@@ -193,6 +193,7 @@ def main() -> int:
 
     runner.check("compose services are running and healthy", lambda: check_compose_health(status_by_service))
     runner.check("container security policy is enforced", check_container_security)
+    runner.check("HTTP health endpoints are available", lambda: check_health_endpoints(status_by_service))
     runner.check(
         "SQL Server MCP query is read-only and connected",
         lambda: check_sql_server(status_by_service, args.timeout_seconds),
@@ -213,6 +214,10 @@ def main() -> int:
     runner.check(
         "RabbitMQ MCP is connected",
         lambda: check_ping(status_by_service, "mcp-rabbitmq", args.timeout_seconds),
+    )
+    runner.check(
+        "write tools reject unsafe no-op inputs",
+        lambda: check_write_tool_guards(status_by_service, args.timeout_seconds, args.include_oracle),
     )
     runner.check(
         "Reader MCP can inspect the mounted root",
@@ -295,14 +300,29 @@ def check_container_security() -> None:
         raise SmokeError("; ".join(failures))
 
 
+def check_health_endpoints(status_by_service: dict[str, dict[str, Any]]) -> None:
+    for service in EXPECTED_SERVICES:
+        if service == "mcp-reader":
+            continue
+
+        url = service_url(status_by_service, service).removesuffix("/mcp") + "/health"
+        with urllib.request.urlopen(url, timeout=10) as response:
+            body = response.read().decode("utf-8")
+
+        health = json.loads(body)
+        if health.get("status") != "ok":
+            raise SmokeError(f"{service} returned an invalid health response: {body}")
+
+
 def check_sql_server(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
     client = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
-    text = client.call_tool("query", {"sql": "SELECT 1 AS value"}).text
-    assert_contains(text, "value")
-    assert_contains(text, "1")
+    response = expect_tool_ok(client.call_tool("query", {"sql": "SELECT 1 AS value"}))
+    data = response.get("data") or {}
+    assert_contains(json.dumps(data), "value")
+    assert_contains(json.dumps(data), "1")
 
-    blocked = client.call_tool("query", {"sql": "SELECT 1 AS value; DROP TABLE dbo.SmokeTest"}).text
-    assert_contains(blocked, "Blocked:")
+    blocked = client.call_tool("query", {"sql": "SELECT 1 AS value; DROP TABLE dbo.SmokeTest"})
+    expect_tool_kind(blocked, "blocked")
 
 
 def check_oracle(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int, include_oracle: bool) -> None:
@@ -310,30 +330,68 @@ def check_oracle(status_by_service: dict[str, dict[str, Any]], timeout_seconds: 
         raise SkipCheck("pass --include-oracle when a read-only Oracle target is available")
 
     client = create_client(status_by_service, "mcp-oracle", timeout_seconds)
-    text = client.call_tool("query", {"sql": "SELECT 1 AS value FROM DUAL"}).text
-    assert_contains(text, "VALUE")
-    assert_contains(text, "1")
+    response = expect_tool_ok(client.call_tool("query", {"sql": "SELECT 1 AS value FROM DUAL"}))
+    data = response.get("data") or {}
+    assert_contains(json.dumps(data), "VALUE")
+    assert_contains(json.dumps(data), "1")
 
-    blocked = client.call_tool("query", {"sql": "SELECT 1 AS value FROM DUAL; DROP TABLE SmokeTest"}).text
-    assert_contains(blocked, "Blocked:")
+    blocked = client.call_tool("query", {"sql": "SELECT 1 AS value FROM DUAL; DROP TABLE SmokeTest"})
+    expect_tool_kind(blocked, "blocked")
 
 
 def check_elasticsearch(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
     client = create_client(status_by_service, "mcp-elasticsearch", timeout_seconds)
-    text = client.call_tool("ping_connection").text
-    assert_contains(text, "OK:")
+    expect_tool_ok(client.call_tool("ping_connection"))
 
-    health_text = client.call_tool("get_cluster_health").text
-    health = json.loads(health_text)
+    response = expect_tool_ok(client.call_tool("get_cluster_health"))
+    health = response.get("data") or {}
     status = str(health.get("status", ""))
     if status.lower() == "red":
-        raise SmokeError(f"Elasticsearch cluster status is red: {health_text}")
+        raise SmokeError(f"Elasticsearch cluster status is red: {json.dumps(health)}")
 
 
 def check_ping(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> None:
     client = create_client(status_by_service, service, timeout_seconds)
-    text = client.call_tool("ping_connection").text
-    assert_contains(text, "OK")
+    expect_tool_ok(client.call_tool("ping_connection"))
+
+
+def check_write_tool_guards(
+    status_by_service: dict[str, dict[str, Any]],
+    timeout_seconds: int,
+    include_oracle: bool,
+) -> None:
+    sql_server = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
+    expect_tool_kind(sql_server.call_tool("execute", {"sql": "DROP TABLE dbo.SmokeTest"}), "blocked")
+
+    redis = create_client(status_by_service, "mcp-redis", timeout_seconds)
+    expect_tool_kind(redis.call_tool("delete_keys", {"keys": ""}), "error")
+    expect_tool_kind(redis.call_tool("set_key_ttl", {"key": "smoke-missing", "ttlSeconds": 0}), "error")
+
+    elasticsearch = create_client(status_by_service, "mcp-elasticsearch", timeout_seconds)
+    expect_tool_kind(
+        elasticsearch.call_tool(
+            "delete_by_query",
+            {
+                "index": "smoke-test",
+                "queryBody": "{\"query\":{\"match_all\":{}}}",
+            },
+        ),
+        "blocked",
+    )
+    expect_tool_kind(
+        elasticsearch.call_tool(
+            "index_document",
+            {
+                "index": "smoke-test",
+                "document": "{",
+            },
+        ),
+        "error",
+    )
+
+    if include_oracle:
+        oracle = create_client(status_by_service, "mcp-oracle", timeout_seconds)
+        expect_tool_kind(oracle.call_tool("execute", {"sql": "DROP TABLE SmokeTest"}), "blocked")
 
 
 def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
@@ -420,6 +478,34 @@ def extract_tool_text(result: dict[str, Any]) -> str:
             texts.append(str(item.get("text") or ""))
 
     return "\n".join(texts)
+
+
+def parse_tool_response(result: ToolResult) -> dict[str, Any]:
+    try:
+        response = json.loads(result.text)
+    except json.JSONDecodeError as exc:
+        raise SmokeError(f"Tool did not return JSON: {result.text}") from exc
+
+    if not isinstance(response, dict) or "ok" not in response or "kind" not in response:
+        raise SmokeError(f"Tool did not return a response envelope: {result.text}")
+
+    return response
+
+
+def expect_tool_ok(result: ToolResult) -> dict[str, Any]:
+    response = parse_tool_response(result)
+    if response.get("ok") is not True:
+        raise SmokeError(f"Expected ok=true response: {result.text}")
+
+    return response
+
+
+def expect_tool_kind(result: ToolResult, expected_kind: str) -> dict[str, Any]:
+    response = parse_tool_response(result)
+    if response.get("kind") != expected_kind:
+        raise SmokeError(f"Expected kind={expected_kind}: {result.text}")
+
+    return response
 
 
 def get_header(headers: HTTPMessage, expected_name: str) -> str | None:

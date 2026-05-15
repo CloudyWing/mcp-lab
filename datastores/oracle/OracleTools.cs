@@ -9,7 +9,6 @@ public sealed class OracleTools {
     private const int MaxQueryTimeoutSeconds = 300;
     private const int DefaultMaxRows = 500;
     private const int MaxResultRows = 5000;
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
     /// <summary>
@@ -40,7 +39,7 @@ public sealed class OracleTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 Oracle 連線")]
     public string ListConnections() =>
-        JsonSerializer.Serialize(
+        ToolResponse.Ok(
             registry.All.Select(
                 kv => new {
                     name = kv.Key,
@@ -49,7 +48,7 @@ public sealed class OracleTools {
                     service = kv.Value.Service,
                     user = kv.Value.User,
                 }
-            ), Json
+            )
         );
 
     /// <summary>
@@ -65,9 +64,11 @@ public sealed class OracleTools {
                 CommandTimeout = 10
             };
             string ver = cmd.ExecuteScalar()?.ToString() ?? "";
-            return $"OK: {ver[..Math.Min(120, ver.Length)]}";
+            return ToolResponse.Ok(new {
+                version = ver[..Math.Min(120, ver.Length)],
+            });
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -100,9 +101,11 @@ public sealed class OracleTools {
                 rows.Add(rdr.FieldCount == 2 ? $"{rdr[0]}.{rdr[1]}" : rdr.GetString(0));
             }
 
-            return rows.Count > 0 ? string.Join("\n", rows) : "No tables found.";
+            return rows.Count > 0
+                ? ToolResponse.Ok(rows)
+                : ToolResponse.Empty("No tables found.", rows);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -152,9 +155,10 @@ public sealed class OracleTools {
             }
 
             return lines.Count > 0
-                ? string.Join("\n", lines) : "Table not found.";
+                ? ToolResponse.Ok(lines)
+                : ToolResponse.Empty("Table not found.", lines);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -180,7 +184,7 @@ public sealed class OracleTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return RunQuery(sql, connection);
@@ -190,7 +194,7 @@ public sealed class OracleTools {
         string upper = sql.TrimStart().ToUpperInvariant();
 
         if (!upper.StartsWith("SELECT") && !upper.StartsWith("WITH")) {
-            return "Error: 僅允許 SELECT / WITH 查詢。";
+            return ToolResponse.Error("僅允許 SELECT / WITH 查詢。");
         }
 
         try {
@@ -200,11 +204,11 @@ public sealed class OracleTools {
             using OracleCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
             using OracleDataReader rdr = cmd.ExecuteReader();
 
-            return FormatResultSet(rdr);
+            return ToolResponse.Ok(ReadResultSet(rdr));
         } catch (InvalidOperationException ex) {
-            return $"Blocked: {ex.Message}";
+            return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -233,7 +237,7 @@ public sealed class OracleTools {
         [Description("連線名稱")] string connection = ""
     ) {
         if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
-            return $"Error: {error}";
+            return ToolResponse.Error(error);
         }
 
         return RunExecute(sql, connection);
@@ -248,17 +252,18 @@ public sealed class OracleTools {
 
             if (upper.StartsWith("SELECT") || upper.StartsWith("WITH")) {
                 using OracleDataReader rdr = cmd.ExecuteReader();
-                return FormatResultSet(rdr);
+                return ToolResponse.Ok(ReadResultSet(rdr));
             }
 
             int affected = cmd.ExecuteNonQuery();
 
-            return affected >= 0
-                ? $"{affected} row(s) affected." : "Command executed successfully.";
+            return ToolResponse.Ok(new {
+                affected_rows = affected >= 0 ? (int?)affected : null,
+            }, affected >= 0 ? "Command affected rows." : "Command executed successfully.");
         } catch (InvalidOperationException ex) {
-            return $"Blocked: {ex.Message}";
+            return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
-            return $"Error: {ex.Message}";
+            return ToolResponse.Error(ex);
         }
     }
 
@@ -305,30 +310,30 @@ public sealed class OracleTools {
         return value;
     }
 
-    private static string FormatResultSet(OracleDataReader rdr) {
-        StringBuilder sb = new();
+    private static object ReadResultSet(OracleDataReader rdr) {
         int max = MaxRows;
         string[] cols = Enumerable.Range(0, rdr.FieldCount)
             .Select(i => rdr.GetName(i))
             .ToArray();
-
-        sb.AppendLine(string.Join(" | ", cols));
-        sb.AppendLine(string.Join(" | ", cols.Select(_ => "---")));
+        List<IReadOnlyList<string>> rows = [];
 
         int count = 0;
 
         while (rdr.Read() && count < max) {
-            sb.AppendLine(string.Join(" | ",
+            rows.Add(
                 Enumerable.Range(0, rdr.FieldCount)
                     .Select(i => rdr.IsDBNull(i) ? "NULL" : rdr[i]?.ToString() ?? "")
-            ));
+                    .ToArray()
+            );
             count++;
         }
 
-        if (count == max) {
-            sb.Append($"... (truncated to {max} rows)");
-        }
-
-        return sb.ToString().TrimEnd();
+        return new {
+            columns = cols,
+            rows,
+            returned_count = rows.Count,
+            truncated = count == max,
+            max_rows = max,
+        };
     }
 }

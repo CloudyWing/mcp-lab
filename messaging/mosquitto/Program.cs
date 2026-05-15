@@ -1,4 +1,5 @@
 using CloudyWing.McpLab.Mosquitto;
+using CloudyWing.McpLab.Shared;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -15,5 +16,6 @@ builder.Services
     .WithTools<MqttTools>();
 
 WebApplication app = builder.Build();
+app.MapMcpHealth("mcp-mosquitto");
 app.MapMcp("/mcp");
 await app.RunAsync();

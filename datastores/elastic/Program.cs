@@ -1,4 +1,5 @@
 using CloudyWing.McpLab.Elastic;
+using CloudyWing.McpLab.Shared;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -24,5 +25,6 @@ builder.Services
     .WithTools<ElasticTools>();
 
 WebApplication app = builder.Build();
+app.MapMcpHealth("mcp-elasticsearch");
 app.MapMcp("/mcp");
 await app.RunAsync();

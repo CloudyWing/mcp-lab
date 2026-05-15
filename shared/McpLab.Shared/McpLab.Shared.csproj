@@ -7,4 +7,8 @@
     <AssemblyName>CloudyWing.$(MSBuildProjectName)</AssemblyName>
     <RootNamespace>CloudyWing.$(MSBuildProjectName.Replace(" ", "_"))</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 </Project>

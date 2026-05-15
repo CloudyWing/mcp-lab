@@ -78,6 +78,14 @@ Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `.env` 
 python3 scripts/smoke-test.py --include-oracle
 ```
 
+可使用分層檢查腳本串接單元測試、Docker build 與 smoke test：
+
+```bash
+python3 scripts/check-all.py
+python3 scripts/check-all.py --build-services --smoke
+python3 scripts/check-all.py --build-services --smoke --include-oracle
+```
+
 ## 環境變數一覽
 
 完整清單請見 [docs/environment-variables.md](./docs/environment-variables.md)。
@@ -103,6 +111,34 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | Oracle | `ORACLE_QUERY_TIMEOUT` / `QUERY_TIMEOUT` | 60 秒 | 300 秒 |
 | Oracle | `ORACLE_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
 | Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
+
+## MCP Tool 回應格式
+
+.NET MCP 服務的 tool 回應使用固定 JSON envelope：
+
+```json
+{
+  "ok": true,
+  "kind": "ok",
+  "message": "OK",
+  "data": {}
+}
+```
+
+`kind` 的常見值：
+
+| kind | 說明 |
+| --- | --- |
+| `ok` | 工具執行成功且有資料或操作結果 |
+| `empty` | 工具執行成功，但沒有符合條件的資料 |
+| `blocked` | 輸入被安全規則阻擋 |
+| `error` | 執行失敗或輸入格式錯誤 |
+
+錯誤訊息會遮罩常見機密片段，例如 password、token、secret、API key 與 URL userinfo。
+
+## Healthcheck
+
+.NET MCP 服務提供 `/health` endpoint，Docker Compose healthcheck 會檢查 HTTP 200，而不是只檢查 TCP port 是否開啟。`mcp-reader` 使用 Python FastMCP，仍維持 TCP healthcheck。
 
 ## SQL / Oracle 寫入防護
 
@@ -310,6 +346,7 @@ docker compose ps                         # 查看狀態
 docker compose logs -f mcp-sql-server     # 查看指定服務 log
 docker compose restart mcp-reader         # 重啟指定服務
 python3 scripts/smoke-test.py             # 執行本機整合 smoke test
+python3 scripts/check-all.py --smoke      # 執行單元測試與 smoke test
 ```
 
 ## 授權
