@@ -25,5 +25,6 @@
     <ProjectReference Include="..\..\messaging\mosquitto\McpLab.Mosquitto.csproj" />
     <ProjectReference Include="..\..\messaging\rabbitmq\McpLab.RabbitMq.csproj" />
     <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
+    <ProjectReference Include="..\..\system\docker\McpLab.Docker.csproj" />
   </ItemGroup>
 </Project>

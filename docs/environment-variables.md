@@ -21,6 +21,14 @@
 | `MCP_MOSQUITTO_PORT` | `9820` |  |
 | `MCP_RABBITMQ_PORT` | `9821` |  |
 | `MCP_READER_PORT` | `9840` |  |
+| `MCP_DOCKER_PORT` | `9860` |  |
+
+## Docker / Compose 服務
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `DOCKER_GID` | `1001` | host 上 `/var/run/docker.sock` 的 group id，用於讓非 root 容器使用者讀取 Docker socket |
+| `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 容器內 Docker socket 路徑 |
 
 ## 資料服務工具限制
 

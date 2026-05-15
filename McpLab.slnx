@@ -22,6 +22,10 @@
   <Folder Name="/shared/">
     <Project Path="shared/McpLab.Shared/McpLab.Shared.csproj" />
   </Folder>
+  <Folder Name="/system/" />
+  <Folder Name="/system/docker/">
+    <Project Path="system/docker/McpLab.Docker.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/McpLab.Guards.Tests/McpLab.Guards.Tests.csproj" />
   </Folder>

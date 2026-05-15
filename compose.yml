@@ -21,6 +21,10 @@ include:
   - path: documents/reader/compose.yml
     env_file: .env
 
+  # System
+  - path: system/docker/compose.yml
+    env_file: .env
+
 networks:
   shared_net:
     name: ${COMPOSE_PROJECT_NAME:-mcp-lab}_shared_net

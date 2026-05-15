@@ -27,6 +27,7 @@ EXPECTED_SERVICES = [
     "mcp-mosquitto",
     "mcp-rabbitmq",
     "mcp-reader",
+    "mcp-docker",
 ]
 
 
@@ -222,6 +223,10 @@ def main() -> int:
     runner.check(
         "Reader MCP can inspect the mounted root",
         lambda: check_reader(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
+        "Docker MCP can inspect compose containers",
+        lambda: check_docker_mcp(status_by_service, args.timeout_seconds),
     )
 
     return runner.finish()
@@ -421,6 +426,26 @@ def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: 
 
     if int(listing.get("returned_count", 0)) > 5:
         raise SmokeError(f"Reader list_documents ignored the limit: {listing_text}")
+
+
+def check_docker_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    client = create_client(status_by_service, "mcp-docker", timeout_seconds)
+    expect_tool_ok(client.call_tool("ping_docker"))
+
+    containers = expect_tool_ok(
+        client.call_tool(
+            "list_containers",
+            {
+                "all": True,
+                "service": "mcp-docker",
+                "limit": 10,
+            },
+        )
+    )
+    data = containers.get("data") or {}
+    assert_contains(json.dumps(data), "mcp-docker")
+
+    expect_tool_ok(client.call_tool("get_container_stats", {"container": "mcp-docker"}))
 
 
 def create_client(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> McpClient:
