@@ -1,10 +1,11 @@
 ARG DOTNET_TAG=10.0
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_TAG} AS build
 WORKDIR /src
-COPY McpLab.Elastic.csproj .
-RUN dotnet restore
-COPY . .
-RUN dotnet publish -c Release -o /app --no-restore
+COPY Directory.Packages.props .
+COPY datastores/elastic/McpLab.Elastic.csproj .
+RUN dotnet restore McpLab.Elastic.csproj
+COPY datastores/elastic/. .
+RUN dotnet publish McpLab.Elastic.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_TAG}
 RUN apt-get update \

@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="*-*" />
-    <PackageReference Include="MQTTnet" Version="4.*" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="MQTTnet" />
   </ItemGroup>
 </Project>

@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="*-*" />
-    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.*" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" />
   </ItemGroup>
 </Project>

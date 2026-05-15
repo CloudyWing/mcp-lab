@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Authors>周尚緯</Authors>
+    <AssemblyName>CloudyWing.$(MSBuildProjectName)</AssemblyName>
+    <RootNamespace>CloudyWing.$(MSBuildProjectName.Replace(" ", "_"))</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\datastores\elastic\McpLab.Elastic.csproj" />
+    <ProjectReference Include="..\..\datastores\oracle\McpLab.Oracle.csproj" />
+    <ProjectReference Include="..\..\datastores\sqlserver\McpLab.SqlServer.csproj" />
+  </ItemGroup>
+</Project>
