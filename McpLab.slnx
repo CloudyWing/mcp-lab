@@ -29,4 +29,8 @@
   <Folder Name="/tests/">
     <Project Path="tests/McpLab.Guards.Tests/McpLab.Guards.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/" />
+  <Folder Name="/tools/mailpit/">
+    <Project Path="tools/mailpit/McpLab.Mailpit.csproj" />
+  </Folder>
 </Solution>

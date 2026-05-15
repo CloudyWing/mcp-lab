@@ -1,9 +1,9 @@
 services:
-  mcp-docker:
-    container_name: mcp-docker
+  mcp-mailpit:
+    container_name: mcp-mailpit
     build:
       context: ../..
-      dockerfile: system/docker/Dockerfile
+      dockerfile: tools/mailpit/Dockerfile
       args:
         DOTNET_TAG: ${DOTNET_TAG:-10.0}
     extends:
@@ -13,16 +13,10 @@ services:
       - path: ../../.env
         required: false
     environment:
-      DOCKER_SOCKET_PATH: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-    group_add:
-      - "0"
-      - "${DOCKER_GID:-1001}"
-    volumes:
-      - type: bind
-        source: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-        target: /var/run/docker.sock
+      MAILPIT_CONN_DEFAULT_NAME: ${MAILPIT_CONN_DEFAULT_NAME:-default}
+      MAILPIT_CONN_DEFAULT_URL: ${MAILPIT_CONN_DEFAULT_URL:-http://host.docker.internal:8025}
     ports:
-      - "${MCP_DOCKER_PORT:-9860}:8080"
+      - "${MCP_MAILPIT_PORT:-9830}:8080"
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
       interval: 10s
@@ -31,5 +25,7 @@ services:
       start_period: 10s
     mem_limit: 256m
     cpus: 0.5
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - shared_net

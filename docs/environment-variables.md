@@ -20,6 +20,7 @@
 | `MCP_REDIS_PORT` | `9803` |  |
 | `MCP_MOSQUITTO_PORT` | `9820` |  |
 | `MCP_RABBITMQ_PORT` | `9821` |  |
+| `MCP_MAILPIT_PORT` | `9830` |  |
 | `MCP_READER_PORT` | `9840` |  |
 | `MCP_DOCKER_PORT` | `9860` |  |
 
@@ -27,7 +28,7 @@
 
 | 變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `DOCKER_GID` | `1001` | host 上 `/var/run/docker.sock` 的 group id，用於讓非 root 容器使用者讀取 Docker socket |
+| `DOCKER_GID` | `1001` | native Linux Docker socket 的 group id；Docker Desktop 另會使用 root group 存取 socket |
 | `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 容器內 Docker socket 路徑 |
 
 ## 資料服務工具限制
@@ -48,6 +49,8 @@
 | --- | --- | --- |
 | `MCP_SMOKE_INCLUDE_ORACLE` | `false` | 設為 `true` 時，`scripts/smoke-test.py` 會執行 Oracle 唯讀查詢檢查 |
 | `MCP_SMOKE_TIMEOUT_SECONDS` | `15` | MCP smoke test 每次 HTTP 請求的逾時秒數 |
+| `MCP_SMOKE_MAILPIT_SMTP_HOST` | `127.0.0.1` | Mailpit smoke test 寄送測試信件使用的 SMTP host |
+| `MCP_SMOKE_MAILPIT_SMTP_PORT` | `1025` | Mailpit smoke test 寄送測試信件使用的 SMTP port |
 
 ## SQL Server 連線
 
@@ -122,6 +125,15 @@
 | `RABBITMQ_CONN_PROD_MGMTPORT` | `15672` | 管理介面埠 |
 | `RABBITMQ_CONN_PROD_USER` | `` | 使用者帳號 |
 | `RABBITMQ_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
+
+## Mailpit 連線
+
+提醒：`ALIAS` 為大寫英數，建議用英文代號，例如 `LOCAL`、`PROD`。
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `MAILPIT_CONN_PROD_NAME` | `` | 連線名稱 |
+| `MAILPIT_CONN_PROD_URL` | `` | Mailpit Web API URL |
 
 ## 文件服務
 

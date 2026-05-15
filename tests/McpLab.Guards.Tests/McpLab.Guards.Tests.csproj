@@ -26,5 +26,6 @@
     <ProjectReference Include="..\..\messaging\rabbitmq\McpLab.RabbitMq.csproj" />
     <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
     <ProjectReference Include="..\..\system\docker\McpLab.Docker.csproj" />
+    <ProjectReference Include="..\..\tools\mailpit\McpLab.Mailpit.csproj" />
   </ItemGroup>
 </Project>

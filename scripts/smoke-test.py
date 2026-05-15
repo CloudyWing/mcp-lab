@@ -6,11 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import smtplib
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass
+from email.message import EmailMessage
 from http.client import HTTPMessage
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,7 @@ EXPECTED_SERVICES = [
     "mcp-redis",
     "mcp-mosquitto",
     "mcp-rabbitmq",
+    "mcp-mailpit",
     "mcp-reader",
     "mcp-docker",
 ]
@@ -215,6 +219,10 @@ def main() -> int:
     runner.check(
         "RabbitMQ MCP is connected",
         lambda: check_ping(status_by_service, "mcp-rabbitmq", args.timeout_seconds),
+    )
+    runner.check(
+        "Mailpit MCP can find captured mail",
+        lambda: check_mailpit_mcp(status_by_service, args.timeout_seconds),
     )
     runner.check(
         "write tools reject unsafe no-op inputs",
@@ -446,6 +454,53 @@ def check_docker_mcp(status_by_service: dict[str, dict[str, Any]], timeout_secon
     assert_contains(json.dumps(data), "mcp-docker")
 
     expect_tool_ok(client.call_tool("get_container_stats", {"container": "mcp-docker"}))
+
+
+def check_mailpit_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    subject = f"mcp-lab smoke {uuid.uuid4()}"
+    recipient = "mcp-smoke@example.test"
+    send_smoke_email(subject, recipient)
+
+    client = create_client(status_by_service, "mcp-mailpit", timeout_seconds)
+    expect_tool_ok(client.call_tool("ping_connection"))
+    found = expect_tool_ok(
+        client.call_tool(
+            "wait_for_message",
+            {
+                "query": subject,
+                "to": recipient,
+                "subjectContains": "mcp-lab smoke",
+                "timeoutSeconds": 10,
+            },
+        )
+    )
+    message = (found.get("data") or {}).get("message") or {}
+    message_id = message.get("id")
+
+    if not isinstance(message_id, str) or not message_id:
+        raise SmokeError(f"Mailpit wait_for_message did not return a message id: {found}")
+
+    headers = expect_tool_ok(client.call_tool("get_message_headers", {"id": message_id}))
+    assert_contains(json.dumps(headers.get("data") or {}), subject)
+
+    source = expect_tool_ok(client.call_tool("get_message_source", {"id": message_id, "limit": 4000}))
+    assert_contains(json.dumps(source.get("data") or {}), subject)
+
+
+def send_smoke_email(subject: str, recipient: str) -> None:
+    host = os.environ.get("MCP_SMOKE_MAILPIT_SMTP_HOST", "127.0.0.1")
+    port = int(os.environ.get("MCP_SMOKE_MAILPIT_SMTP_PORT", "1025"))
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = "mcp-smoke@example.test"
+    message["To"] = recipient
+    message.set_content("mcp-lab smoke test body")
+
+    try:
+        with smtplib.SMTP(host, port, timeout=10) as smtp:
+            smtp.send_message(message)
+    except OSError as exc:
+        raise SmokeError(f"Mailpit SMTP endpoint {host}:{port} is not reachable: {exc}") from exc
 
 
 def create_client(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> McpClient:

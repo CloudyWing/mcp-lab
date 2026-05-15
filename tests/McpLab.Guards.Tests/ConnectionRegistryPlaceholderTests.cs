@@ -2,6 +2,7 @@ using NSubstitute;
 using NUnit.Framework;
 
 using ElasticConnectionRegistry = CloudyWing.McpLab.Elastic.ConnectionRegistry;
+using MailpitConnectionRegistry = CloudyWing.McpLab.Mailpit.ConnectionRegistry;
 using MosquittoConnectionRegistry = CloudyWing.McpLab.Mosquitto.ConnectionRegistry;
 using OracleConnectionRegistry = CloudyWing.McpLab.Oracle.ConnectionRegistry;
 using RabbitMqConnectionRegistry = CloudyWing.McpLab.RabbitMq.ConnectionRegistry;
@@ -16,6 +17,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         "ORACLE_CONN_",
         "ES_CONN_",
         "REDIS_CONN_",
+        "MAILPIT_CONN_",
         "MQTT_CONN_",
         "RABBITMQ_CONN_",
     ];
@@ -116,6 +118,20 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
         RabbitMqConnectionRegistry registry = new(httpClientFactory);
+
+        Assert.That(registry.All, Is.Empty);
+    }
+
+    [Test]
+    public void MailpitConnectionRegistry_BlankTemplateVariables_IgnoresConnection() {
+        using EnvironmentScope environmentScope = new();
+        SetEnvironmentVariables("MAILPIT_CONN_TEMPLATE", [
+            ("NAME", ""),
+            ("URL", ""),
+        ]);
+        IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
+
+        MailpitConnectionRegistry registry = new(httpClientFactory);
 
         Assert.That(registry.All, Is.Empty);
     }

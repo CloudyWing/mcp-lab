@@ -25,6 +25,10 @@ include:
   - path: system/docker/compose.yml
     env_file: .env
 
+  # Tools
+  - path: tools/mailpit/compose.yml
+    env_file: .env
+
 networks:
   shared_net:
     name: ${COMPOSE_PROJECT_NAME:-mcp-lab}_shared_net
