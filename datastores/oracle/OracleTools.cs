@@ -182,6 +182,7 @@ public sealed class OracleTools {
         }
 
         try {
+            SqlGuard.ValidateReadOnlyQuery(sql);
             SqlGuard.Validate(sql);
             using OracleConnection conn = registry.Open(connection);
             using OracleCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };

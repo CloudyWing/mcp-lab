@@ -60,6 +60,29 @@ public static partial class SqlGuard {
         }
     }
 
+    /// <summary>
+    /// Throws <see cref="InvalidOperationException"/> when a read-only query contains DML, DDL, or command keywords.
+    /// </summary>
+    public static void ValidateReadOnlyQuery(string sql) {
+        string clean = StripComments(sql);
+        string masked = MaskLiterals(clean);
+        string upper = masked.TrimStart().ToUpperInvariant();
+
+        if (!upper.StartsWith("SELECT") && !upper.StartsWith("WITH")) {
+            throw new InvalidOperationException("Only SELECT / WITH read queries are allowed.");
+        }
+
+        if (ReadOnlyForbiddenKeywordRegex().IsMatch(masked)) {
+            throw new InvalidOperationException("Only SELECT / WITH read queries are allowed.");
+        }
+    }
+
+    private static string MaskLiterals(string sql) {
+        string masked = SingleQuotedLiteralRegex().Replace(sql, "''");
+
+        return DoubleQuotedLiteralRegex().Replace(masked, "\"\"");
+    }
+
     [GeneratedRegex(@"\bDROP\s+TABLE\b", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex DropTableRegex();
 
@@ -107,4 +130,13 @@ public static partial class SqlGuard {
 
     [GeneratedRegex(@"\bUPDATE\b", RegexOptions.IgnoreCase)]
     private static partial Regex UpdateKeywordRegex();
+
+    [GeneratedRegex(@"\b(?:INSERT|UPDATE|DELETE|MERGE|CALL|BEGIN|DECLARE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|FLASHBACK)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ReadOnlyForbiddenKeywordRegex();
+
+    [GeneratedRegex(@"N?'(?:''|[^'])*'", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex SingleQuotedLiteralRegex();
+
+    [GeneratedRegex(@"""(?:""""|[^""])*""", RegexOptions.Singleline)]
+    private static partial Regex DoubleQuotedLiteralRegex();
 }

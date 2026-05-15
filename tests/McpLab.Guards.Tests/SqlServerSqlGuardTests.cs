@@ -51,4 +51,22 @@ internal sealed class SqlServerSqlGuardTests {
 
         Assert.That(exception.Message, Does.Contain("Always-true WHERE"));
     }
+
+    [TestCase("SELECT 1 AS value")]
+    [TestCase("WITH cte AS (SELECT 1 AS value) SELECT value FROM cte")]
+    [TestCase("SELECT 'DELETE' AS keyword")]
+    [TestCase("SELECT [UPDATE] FROM dbo.AuditLog")]
+    public void ValidateReadOnlyQuery_ReadOnlySql_DoesNotThrow(string sql) {
+        Assert.DoesNotThrow(() => SqlServerSqlGuard.ValidateReadOnlyQuery(sql));
+    }
+
+    [TestCase("WITH cte AS (SELECT 1 AS id) DELETE FROM dbo.Users WHERE Id IN (SELECT id FROM cte)")]
+    [TestCase("SELECT 1; DROP TABLE dbo.Users")]
+    [TestCase("EXEC dbo.RebuildIndex")]
+    public void ValidateReadOnlyQuery_WriteOrCommandSql_ThrowsInvalidOperationException(string sql) {
+        InvalidOperationException exception =
+            Assert.Throws<InvalidOperationException>(() => SqlServerSqlGuard.ValidateReadOnlyQuery(sql))!;
+
+        Assert.That(exception.Message, Does.Contain("Only SELECT / WITH read queries"));
+    }
 }

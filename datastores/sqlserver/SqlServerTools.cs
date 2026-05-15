@@ -199,6 +199,7 @@ public sealed class SqlServerTools {
         }
 
         try {
+            SqlGuard.ValidateReadOnlyQuery(sql);
             SqlGuard.Validate(sql);
             using SqlConnection conn = registry.Open(connection, database);
             using SqlCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
