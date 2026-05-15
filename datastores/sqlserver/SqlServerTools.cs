@@ -5,6 +5,10 @@ namespace CloudyWing.McpLab.SqlServer;
 /// </summary>
 [McpServerToolType]
 public sealed class SqlServerTools {
+    private const int DefaultQueryTimeoutSeconds = 60;
+    private const int MaxQueryTimeoutSeconds = 300;
+    private const int DefaultMaxRows = 500;
+    private const int MaxResultRows = 5000;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
@@ -16,12 +20,20 @@ public sealed class SqlServerTools {
     }
 
     private static int QueryTimeout =>
-        int.TryParse(Environment.GetEnvironmentVariable("QUERY_TIMEOUT"), out int timeoutSeconds)
-            ? timeoutSeconds : 60;
+        ToolRuntimeOptions.GetEnvironmentInt32(
+            ["MSSQL_QUERY_TIMEOUT", "QUERY_TIMEOUT"],
+            DefaultQueryTimeoutSeconds,
+            1,
+            MaxQueryTimeoutSeconds
+        );
 
     private static int MaxRows =>
-        int.TryParse(Environment.GetEnvironmentVariable("MAX_ROWS"), out int maxRows)
-            ? maxRows : 500;
+        ToolRuntimeOptions.GetEnvironmentInt32(
+            ["MSSQL_MAX_ROWS", "MAX_ROWS"],
+            DefaultMaxRows,
+            1,
+            MaxResultRows
+        );
 
     /// <summary>
     /// 列出所有已設定的 SQL Server 連線
@@ -213,6 +225,9 @@ public sealed class SqlServerTools {
         }
     }
 
+    /// <summary>
+    /// 執行 SQL（INSERT / UPDATE / DELETE / DDL）。
+    /// </summary>
     [McpServerTool, Description(
         "執行 SQL（INSERT / UPDATE / DELETE / DDL）。" +
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]

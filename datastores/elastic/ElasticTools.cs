@@ -5,6 +5,8 @@ namespace CloudyWing.McpLab.Elastic;
 /// </summary>
 [McpServerToolType]
 public sealed class ElasticTools {
+    private const int DefaultSearchSize = 10;
+    private const int MaxSearchSize = 1000;
     private static readonly JsonSerializerOptions JsonPretty = new() { WriteIndented = true };
     private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private static readonly string[] Value = ["*"];
@@ -18,8 +20,12 @@ public sealed class ElasticTools {
     }
 
     private static int DefaultSize =>
-        int.TryParse(Environment.GetEnvironmentVariable("MAX_ROWS"), out int maxRows)
-            ? maxRows : 10;
+        ToolRuntimeOptions.GetEnvironmentInt32(
+            ["ES_SEARCH_SIZE", "MAX_ROWS"],
+            DefaultSearchSize,
+            1,
+            MaxSearchSize
+        );
 
     /// <summary>
     /// 列出所有已設定的 Elasticsearch 連線
@@ -145,16 +151,19 @@ public sealed class ElasticTools {
     }
 
     private async Task<string> RunSearch(string index, string queryBody, int size, string connection) {
-        if (size <= 0) {
-            size = DefaultSize;
-        }
+        int safeSize = ToolRuntimeOptions.NormalizeRequestedInt32(
+            size,
+            DefaultSize,
+            1,
+            MaxSearchSize
+        );
 
         string body = BuildQueryBody(queryBody);
 
         try {
             using HttpClient http = registry.CreateClient(connection);
             HttpResponseMessage resp = await http.PostAsync(
-                $"/{Uri.EscapeDataString(index)}/_search?size={size}",
+                $"/{Uri.EscapeDataString(index)}/_search?size={safeSize}",
                 new StringContent(body, Encoding.UTF8, "application/json")
             );
             string responseBody = await resp.Content.ReadAsStringAsync();
@@ -257,6 +266,9 @@ public sealed class ElasticTools {
         }
     }
 
+    /// <summary>
+    /// 依查詢條件批次刪除文件。
+    /// </summary>
     [McpServerTool, Description(
         "依查詢條件批次刪除文件（等同 DELETE...WHERE）。" +
         "禁止 match_all（等同 TRUNCATE）。query_body 必須包含具體過濾條件。")]

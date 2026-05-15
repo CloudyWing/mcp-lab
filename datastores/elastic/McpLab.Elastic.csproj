@@ -14,4 +14,8 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <!-- Use HttpClient directly for full JSON flexibility; no ES SDK needed -->
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
+  </ItemGroup>
 </Project>

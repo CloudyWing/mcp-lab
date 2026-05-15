@@ -24,5 +24,6 @@
     <ProjectReference Include="..\..\datastores\sqlserver\McpLab.SqlServer.csproj" />
     <ProjectReference Include="..\..\messaging\mosquitto\McpLab.Mosquitto.csproj" />
     <ProjectReference Include="..\..\messaging\rabbitmq\McpLab.RabbitMq.csproj" />
+    <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
   </ItemGroup>
 </Project>

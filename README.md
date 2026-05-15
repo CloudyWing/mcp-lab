@@ -92,6 +92,18 @@ python3 scripts/smoke-test.py --include-oracle
 - 目標服務為遠端機器：填 DNS 名稱或 IP
 - Elasticsearch 使用 HTTPS 自簽憑證：設定 `ES_CONN_{ALIAS}_SSL_SKIP_VERIFY=true`
 
+## 資料服務工具限制
+
+SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避免單次 MCP 呼叫回傳過大內容或長時間卡住。
+
+| 服務 | 變數 | 預設值 | 上限 |
+| --- | --- | --- | --- |
+| SQL Server | `MSSQL_QUERY_TIMEOUT` / `QUERY_TIMEOUT` | 60 秒 | 300 秒 |
+| SQL Server | `MSSQL_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
+| Oracle | `ORACLE_QUERY_TIMEOUT` / `QUERY_TIMEOUT` | 60 秒 | 300 秒 |
+| Oracle | `ORACLE_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
+| Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
+
 ## SQL / Oracle 寫入防護
 
 `execute` 工具內建 SqlGuard，防止危險寫入操作：

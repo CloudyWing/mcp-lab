@@ -19,6 +19,9 @@
   <Folder Name="/messaging/rabbitmq/">
     <Project Path="messaging/rabbitmq/McpLab.RabbitMq.csproj" />
   </Folder>
+  <Folder Name="/shared/">
+    <Project Path="shared/McpLab.Shared/McpLab.Shared.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/McpLab.Guards.Tests/McpLab.Guards.Tests.csproj" />
   </Folder>

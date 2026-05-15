@@ -22,6 +22,18 @@
 | `MCP_RABBITMQ_PORT` | `9821` |  |
 | `MCP_READER_PORT` | `9840` |  |
 
+## 資料服務工具限制
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `QUERY_TIMEOUT` | `60` | SQL Server 與 Oracle 查詢逾時秒數後備值，允許 1 到 300 |
+| `MSSQL_QUERY_TIMEOUT` | `` | SQL Server 查詢逾時秒數，未設定時使用 `QUERY_TIMEOUT` |
+| `ORACLE_QUERY_TIMEOUT` | `` | Oracle 查詢逾時秒數，未設定時使用 `QUERY_TIMEOUT` |
+| `MAX_ROWS` | `` | 舊版相容用的回傳筆數後備值，建議改用服務專屬變數 |
+| `MSSQL_MAX_ROWS` | `500` | SQL Server 查詢最大回傳列數，允許 1 到 5000 |
+| `ORACLE_MAX_ROWS` | `500` | Oracle 查詢最大回傳列數，允許 1 到 5000 |
+| `ES_SEARCH_SIZE` | `10` | Elasticsearch 搜尋預設回傳筆數，允許 1 到 1000 |
+
 ## 本機整合測試
 
 | 變數 | 預設值 | 說明 |

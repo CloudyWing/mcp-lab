@@ -1,10 +1,14 @@
 namespace CloudyWing.McpLab.Oracle;
 
-[McpServerToolType]
 /// <summary>
 /// Provides MCP tools for querying and writing to Oracle databases.
 /// </summary>
+[McpServerToolType]
 public sealed class OracleTools {
+    private const int DefaultQueryTimeoutSeconds = 60;
+    private const int MaxQueryTimeoutSeconds = 300;
+    private const int DefaultMaxRows = 500;
+    private const int MaxResultRows = 5000;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
 
@@ -16,12 +20,20 @@ public sealed class OracleTools {
     }
 
     private static int QueryTimeout =>
-        int.TryParse(Environment.GetEnvironmentVariable("QUERY_TIMEOUT"), out int timeoutSeconds)
-            ? timeoutSeconds : 60;
+        ToolRuntimeOptions.GetEnvironmentInt32(
+            ["ORACLE_QUERY_TIMEOUT", "QUERY_TIMEOUT"],
+            DefaultQueryTimeoutSeconds,
+            1,
+            MaxQueryTimeoutSeconds
+        );
 
     private static int MaxRows =>
-        int.TryParse(Environment.GetEnvironmentVariable("MAX_ROWS"), out int maxRows)
-            ? maxRows : 500;
+        ToolRuntimeOptions.GetEnvironmentInt32(
+            ["ORACLE_MAX_ROWS", "MAX_ROWS"],
+            DefaultMaxRows,
+            1,
+            MaxResultRows
+        );
 
     /// <summary>
     /// 列出所有已設定的 Oracle 連線
@@ -196,8 +208,12 @@ public sealed class OracleTools {
         }
     }
 
-    [McpServerTool]
-    [Description("執行 Oracle SQL / PL/SQL（INSERT / UPDATE / DELETE / DDL / ANONYMOUS BLOCK）。禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
+    /// <summary>
+    /// 執行 Oracle SQL / PL/SQL（INSERT / UPDATE / DELETE / DDL / ANONYMOUS BLOCK）。
+    /// </summary>
+    [McpServerTool, Description(
+        "執行 Oracle SQL / PL/SQL（INSERT / UPDATE / DELETE / DDL / ANONYMOUS BLOCK）。" +
+        "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
     public string Execute(
         [Description("SQL 或 PL/SQL 語句")] string sql,
         [Description("連線名稱")] string connection = ""
@@ -205,8 +221,10 @@ public sealed class OracleTools {
         return RunExecute(sql, connection);
     }
 
-    [McpServerTool]
-    [Description(
+    /// <summary>
+    /// 執行 Oracle SQL / PL/SQL（Base64）。避免傳輸過程清洗字元。
+    /// </summary>
+    [McpServerTool, Description(
         "執行 Oracle SQL / PL/SQL（Base64）。避免傳輸過程清洗字元。" +
         "當字串常值、JSON 等內容被清洗（例如單引號消失）時，請改用本工具。" +
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]

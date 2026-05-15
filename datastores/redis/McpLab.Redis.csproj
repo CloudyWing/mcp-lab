@@ -14,4 +14,8 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="StackExchange.Redis" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
+  </ItemGroup>
 </Project>

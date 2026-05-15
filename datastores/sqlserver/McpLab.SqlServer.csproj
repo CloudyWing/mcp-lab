@@ -14,4 +14,8 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
+  </ItemGroup>
 </Project>
