@@ -69,67 +69,33 @@ public sealed partial class ConnectionRegistry {
     }
 
     private static Dictionary<string, ConnectionConfig> Load() {
-        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
-            string val = Environment.GetEnvironmentVariable(key) ?? "";
-            Match match = EnvRegex().Match(key);
-
-            if (!match.Success) {
-                continue;
-            }
-
-            string aliasKey = match.Groups[1].Value;
-            string field = match.Groups[2].Value.ToLowerInvariant();
-
-            if (!buckets.TryGetValue(aliasKey, out Dictionary<string, string>? value)) {
-                value = [];
-                buckets[aliasKey] = value;
-            }
-
-            value[field] = val;
-        }
+        Dictionary<string, Dictionary<string, string>> buckets =
+            EnvironmentConnectionSettings.LoadBuckets(EnvRegex());
 
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!HasConfiguredConnection(cfg, "name", "url", "user", "password", "ssl_skip_verify")) {
+            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
+                cfg,
+                "name",
+                "url",
+                "user",
+                "password",
+                "ssl_skip_verify"
+            )) {
                 continue;
             }
 
-            string url = (cfg.GetValueOrDefault("url") ?? "").Trim();
-
-            string name = (cfg.GetValueOrDefault("name") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(name)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_NAME is required.");
-            }
-
-            if (string.IsNullOrEmpty(url)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_URL is required.");
-            }
-
-            string user = (cfg.GetValueOrDefault("user") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(user)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_USER is required.");
-            }
-
-            string password = (cfg.GetValueOrDefault("password") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(password)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_PASSWORD is required.");
-            }
-
-            string sslSkipStr = (cfg.GetValueOrDefault("ssl_skip_verify") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(sslSkipStr)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_SSL_SKIP_VERIFY is required.");
-            }
-
-            if (!bool.TryParse(sslSkipStr, out bool sslSkipVerify)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ES_CONN_{aliasKey}_SSL_SKIP_VERIFY must be true or false.");
-            }
+            string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "name");
+            string url = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "url");
+            string user = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "user");
+            string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "password");
+            bool sslSkipVerify = EnvironmentConnectionSettings.GetRequiredBool(
+                cfg,
+                aliasKey,
+                "ES_CONN",
+                "ssl_skip_verify"
+            );
 
             result[name] = new ConnectionConfig(
                 Name: name,
@@ -142,9 +108,6 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
-
-    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
-        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^ES_CONN_([A-Z0-9]+)_([A-Z0-9_]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

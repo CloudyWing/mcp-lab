@@ -51,72 +51,29 @@ public sealed partial class ConnectionRegistry {
     }
 
     private static Dictionary<string, ConnectionConfig> Load() {
-        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
-            string val = Environment.GetEnvironmentVariable(key) ?? "";
-            Match match = EnvRegex().Match(key);
-
-            if (!match.Success) {
-                continue;
-            }
-
-            string aliasKey = match.Groups[1].Value;
-            string field = match.Groups[2].Value.ToLowerInvariant();
-
-            if (!buckets.TryGetValue(aliasKey, out Dictionary<string, string>? value)) {
-                value = [];
-                buckets[aliasKey] = value;
-            }
-
-            value[field] = val;
-        }
+        Dictionary<string, Dictionary<string, string>> buckets =
+            EnvironmentConnectionSettings.LoadBuckets(EnvRegex());
 
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!HasConfiguredConnection(cfg, "name", "host", "user", "password", "database")) {
+            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
+                cfg,
+                "name",
+                "host",
+                "user",
+                "password",
+                "database"
+            )) {
                 continue;
             }
 
-            string host = (cfg.GetValueOrDefault("host") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(host)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_HOST is required.");
-            }
-
-            string portStr = (cfg.GetValueOrDefault("port") ?? "").Trim();
-            int port = 1433;
-
-            if (!string.IsNullOrEmpty(portStr)) {
-                if (!int.TryParse(portStr, out port) || port <= 0) {
-                    throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_PORT must be a valid port number.");
-                }
-            }
-
-            string name = (cfg.GetValueOrDefault("name") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(name)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_NAME is required.");
-            }
-
-            string user = (cfg.GetValueOrDefault("user") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(user)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_USER is required.");
-            }
-
-            string password = (cfg.GetValueOrDefault("password") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(password)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_PASSWORD is required.");
-            }
-
-            string database = (cfg.GetValueOrDefault("database") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(database)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': MSSQL_CONN_{aliasKey}_DATABASE is required.");
-            }
+            string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MSSQL_CONN", "name");
+            string host = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MSSQL_CONN", "host");
+            int port = EnvironmentConnectionSettings.GetOptionalPort(cfg, aliasKey, "MSSQL_CONN", 1433, "port", "port");
+            string user = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MSSQL_CONN", "user");
+            string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MSSQL_CONN", "password");
+            string database = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MSSQL_CONN", "database");
 
             result[name] = new ConnectionConfig(
                 Name: name,
@@ -129,9 +86,6 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
-
-    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
-        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^MSSQL_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

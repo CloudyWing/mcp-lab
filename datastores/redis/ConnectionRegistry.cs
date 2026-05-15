@@ -51,70 +51,33 @@ public sealed partial class ConnectionRegistry {
     }
 
     private static Dictionary<string, ConnectionConfig> Load() {
-        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
-            string val = Environment.GetEnvironmentVariable(key) ?? "";
-            Match match = EnvRegex().Match(key);
-
-            if (!match.Success) {
-                continue;
-            }
-
-            string aliasKey = match.Groups[1].Value;
-            string field = match.Groups[2].Value.ToLowerInvariant();
-
-            if (!buckets.TryGetValue(aliasKey, out Dictionary<string, string>? value)) {
-                value = [];
-                buckets[aliasKey] = value;
-            }
-
-            value[field] = val;
-        }
+        Dictionary<string, Dictionary<string, string>> buckets =
+            EnvironmentConnectionSettings.LoadBuckets(EnvRegex());
 
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!HasConfiguredConnection(cfg, "name", "host", "password", "database")) {
+            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
+                cfg,
+                "name",
+                "host",
+                "password",
+                "database"
+            )) {
                 continue;
             }
 
-            string host = (cfg.GetValueOrDefault("host") ?? "").Trim();
-
-            string name = (cfg.GetValueOrDefault("name") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(name)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_NAME is required.");
-            }
-
-            if (string.IsNullOrEmpty(host)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_HOST is required.");
-            }
-
-            string portStr = (cfg.GetValueOrDefault("port") ?? "").Trim();
-            int port = 6379;
-
-            if (!string.IsNullOrEmpty(portStr)) {
-                if (!int.TryParse(portStr, out port) || port <= 0) {
-                    throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_PORT must be a valid port number.");
-                }
-            }
-
-            string password = (cfg.GetValueOrDefault("password") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(password)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_PASSWORD is required.");
-            }
-
-            string dbStr = (cfg.GetValueOrDefault("database") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(dbStr)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_DATABASE is required.");
-            }
-
-            if (!int.TryParse(dbStr, out int database) || database < 0) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': REDIS_CONN_{aliasKey}_DATABASE must be a valid database number.");
-            }
+            string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "name");
+            string host = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "host");
+            int port = EnvironmentConnectionSettings.GetOptionalPort(cfg, aliasKey, "REDIS_CONN", 6379, "port", "port");
+            string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "password");
+            int database = EnvironmentConnectionSettings.GetRequiredNonNegativeInt(
+                cfg,
+                aliasKey,
+                "REDIS_CONN",
+                "database",
+                "database number"
+            );
 
             result[name] = new ConnectionConfig(
                 Name: name,
@@ -127,9 +90,6 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
-
-    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
-        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^REDIS_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

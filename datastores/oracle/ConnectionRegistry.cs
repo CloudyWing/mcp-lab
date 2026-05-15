@@ -44,71 +44,36 @@ public sealed partial class ConnectionRegistry {
     }
 
     private static Dictionary<string, ConnectionConfig> Load() {
-        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
-            string val = Environment.GetEnvironmentVariable(key) ?? "";
-            Match match = EnvRegex().Match(key);
-
-            if (!match.Success) {
-                continue;
-            }
-
-            string aliasKey = match.Groups[1].Value;
-            string field = match.Groups[2].Value.ToLowerInvariant();
-
-            if (!buckets.TryGetValue(aliasKey, out Dictionary<string, string>? value)) {
-                value = [];
-                buckets[aliasKey] = value;
-            }
-
-            value[field] = val;
-        }
+        Dictionary<string, Dictionary<string, string>> buckets =
+            EnvironmentConnectionSettings.LoadBuckets(EnvRegex());
 
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
         foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!HasConfiguredConnection(cfg, "name", "host", "service", "user", "password")) {
+            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
+                cfg,
+                "name",
+                "host",
+                "service",
+                "user",
+                "password"
+            )) {
                 continue;
             }
 
-            string host = (cfg.GetValueOrDefault("host") ?? "").Trim();
-            string service = (cfg.GetValueOrDefault("service") ?? "").Trim();
-
-            string name = (cfg.GetValueOrDefault("name") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(name)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_NAME is required.");
-            }
-
-            if (string.IsNullOrEmpty(host)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_HOST is required.");
-            }
-
-            if (string.IsNullOrEmpty(service)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_SERVICE is required.");
-            }
-
-            string portStr = (cfg.GetValueOrDefault("port") ?? "").Trim();
-            int port = 1521;
-
-            if (!string.IsNullOrEmpty(portStr)) {
-                if (!int.TryParse(portStr, out port) || port <= 0) {
-                    throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_PORT must be a valid port number.");
-                }
-            }
-
-            string user = (cfg.GetValueOrDefault("user") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(user)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_USER is required.");
-            }
-
-            string password = (cfg.GetValueOrDefault("password") ?? "").Trim();
-
-            if (string.IsNullOrEmpty(password)) {
-                throw new InvalidOperationException($"Connection '{aliasKey}': ORACLE_CONN_{aliasKey}_PASSWORD is required.");
-            }
+            string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ORACLE_CONN", "name");
+            string host = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ORACLE_CONN", "host");
+            string service = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ORACLE_CONN", "service");
+            int port = EnvironmentConnectionSettings.GetOptionalPort(
+                cfg,
+                aliasKey,
+                "ORACLE_CONN",
+                1521,
+                "port",
+                "port"
+            );
+            string user = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ORACLE_CONN", "user");
+            string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ORACLE_CONN", "password");
 
             result[name] = new ConnectionConfig(
                 Name: name,
@@ -122,9 +87,6 @@ public sealed partial class ConnectionRegistry {
 
         return result;
     }
-
-    private static bool HasConfiguredConnection(Dictionary<string, string> cfg, params string[] fields) =>
-        fields.Any(field => !string.IsNullOrWhiteSpace(cfg.GetValueOrDefault(field)));
 
     [GeneratedRegex(@"^ORACLE_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();

@@ -121,6 +121,23 @@ internal sealed class ConnectionRegistryPlaceholderTests {
     }
 
     [Test]
+    public void RabbitMqConnectionRegistry_MgmtPortUnderscoreVariable_LoadsConfiguredPort() {
+        using EnvironmentScope environmentScope = new();
+        SetEnvironmentVariables("RABBITMQ_CONN_MAIN", [
+            ("NAME", "main"),
+            ("HOST", "localhost"),
+            ("MGMT_PORT", "15673"),
+            ("USER", "guest"),
+            ("PASSWORD", "guest"),
+        ]);
+        IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
+
+        RabbitMqConnectionRegistry registry = new(httpClientFactory);
+
+        Assert.That(registry.All["main"].MgmtPort, Is.EqualTo(15673));
+    }
+
+    [Test]
     public void SqlServerConnectionRegistry_PartialVariables_ThrowsInvalidOperationException() {
         using EnvironmentScope environmentScope = new();
         SetEnvironmentVariables("MSSQL_CONN_PARTIAL", [
