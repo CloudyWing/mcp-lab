@@ -54,6 +54,30 @@ docker compose up -d --build
 docker compose ps
 ```
 
+## 測試
+
+單元測試不依賴外部服務，可直接執行：
+
+```bash
+dotnet test
+```
+
+本機整合 smoke test 需要 Docker Compose 堆疊已啟動，並且 `.env` 已指向可連線的測試環境：
+
+```bash
+python3 scripts/smoke-test.py
+```
+
+此腳本會檢查 Compose 容器健康狀態、`read_only`、`cap_drop: [ALL]`、`no-new-privileges`、`/tmp`
+tmpfs、非 root 使用者，並呼叫各 MCP 服務的 ping 或唯讀查詢工具。SQL Server 與 Oracle 會驗證
+`query` 工具拒絕同一段輸入中的寫入語句。
+
+Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `.env` 已設定可查詢的 Oracle 連線，可明確啟用：
+
+```bash
+python3 scripts/smoke-test.py --include-oracle
+```
+
 ## 環境變數一覽
 
 完整清單請見 [docs/environment-variables.md](./docs/environment-variables.md)。
@@ -273,6 +297,7 @@ docker compose down -v                    # 停止並清除資料
 docker compose ps                         # 查看狀態
 docker compose logs -f mcp-sql-server     # 查看指定服務 log
 docker compose restart mcp-reader         # 重啟指定服務
+python3 scripts/smoke-test.py             # 執行本機整合 smoke test
 ```
 
 ## 授權

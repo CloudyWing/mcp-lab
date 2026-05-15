@@ -22,6 +22,13 @@
 | `MCP_RABBITMQ_PORT` | `9821` |  |
 | `MCP_READER_PORT` | `9840` |  |
 
+## 本機整合測試
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `MCP_SMOKE_INCLUDE_ORACLE` | `false` | 設為 `true` 時，`scripts/smoke-test.py` 會執行 Oracle 唯讀查詢檢查 |
+| `MCP_SMOKE_TIMEOUT_SECONDS` | `15` | MCP smoke test 每次 HTTP 請求的逾時秒數 |
+
 ## SQL Server 連線
 
 提醒：`ALIAS` 為大寫英數，建議用英文代號，例如 `LOCAL`、`PROD`。
