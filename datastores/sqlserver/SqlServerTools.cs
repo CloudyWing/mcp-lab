@@ -203,7 +203,13 @@ public sealed class SqlServerTools {
         [Description("資料庫名稱")] string database = "master",
         [Description("連線名稱")] string connection = ""
     ) {
-        if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
+        if (!Base64Payload.TryDecodeUtf8(
+            sqlBase64,
+            "SQL payload is empty.",
+            "Decoded SQL is empty.",
+            out string sql,
+            out string error
+        )) {
             return ToolResponse.Error(error);
         }
 
@@ -258,7 +264,13 @@ public sealed class SqlServerTools {
         [Description("資料庫名稱")] string database = "master",
         [Description("連線名稱")] string connection = ""
     ) {
-        if (!TryDecodeBase64(sqlBase64, out string sql, out string error)) {
+        if (!Base64Payload.TryDecodeUtf8(
+            sqlBase64,
+            "SQL payload is empty.",
+            "Decoded SQL is empty.",
+            out string sql,
+            out string error
+        )) {
             return ToolResponse.Error(error);
         }
 
@@ -289,49 +301,6 @@ public sealed class SqlServerTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
-    }
-
-    private static bool TryDecodeBase64(string input, out string sql, out string error) {
-        sql = string.Empty;
-        error = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(input)) {
-            error = "SQL payload is empty.";
-            return false;
-        }
-
-        try {
-            string normalized = NormalizeBase64(input);
-            byte[] bytes = Convert.FromBase64String(normalized);
-            sql = Encoding.UTF8.GetString(bytes);
-
-            if (string.IsNullOrWhiteSpace(sql)) {
-                error = "Decoded SQL is empty.";
-                return false;
-            }
-
-            return true;
-        } catch (FormatException) {
-            error = "Invalid Base64.";
-            return false;
-        }
-    }
-
-    private static string NormalizeBase64(string input) {
-        string value = input.Trim()
-            .Replace('-', '+')
-            .Replace('_', '/');
-        int mod = value.Length % 4;
-
-        if (mod == 2) {
-            return value + "==";
-        }
-
-        if (mod == 3) {
-            return value + "=";
-        }
-
-        return value;
     }
 
     private static object ReadResultSet(SqlDataReader rdr) {

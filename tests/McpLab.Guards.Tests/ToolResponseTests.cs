@@ -42,4 +42,48 @@ internal sealed class ToolResponseTests {
 
         Assert.That(root.GetProperty("message").GetString(), Is.EqualTo("Password=***; login failed"));
     }
+
+    [Test]
+    public void Error_DataWithSecret_RedactsSecretRecursively() {
+        string json = ToolResponse.Error(
+            "failed",
+            new {
+                password = "sample-secret",
+                nested = new {
+                    token = "sample-token",
+                    url = "https://user:secret@example.test/path",
+                },
+            }
+        );
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement data = document.RootElement.GetProperty("data");
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(data.GetProperty("password").GetString(), Is.EqualTo("***"));
+            Assert.That(data.GetProperty("nested").GetProperty("token").GetString(), Is.EqualTo("***"));
+            Assert.That(
+                data.GetProperty("nested").GetProperty("url").GetString(),
+                Is.EqualTo("https://***:***@example.test/path")
+            );
+        }
+    }
+
+    [Test]
+    public void Ok_DataWithNestedArrays_ReturnsEnvelope() {
+        string json = ToolResponse.Ok(new {
+            columns = new[] { "value" },
+            rows = new[] {
+                new[] { "1" },
+            },
+        });
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement data = document.RootElement.GetProperty("data");
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(data.GetProperty("columns")[0].GetString(), Is.EqualTo("value"));
+            Assert.That(data.GetProperty("rows")[0][0].GetString(), Is.EqualTo("1"));
+        }
+    }
 }

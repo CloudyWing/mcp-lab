@@ -21,8 +21,16 @@ public static partial class SensitiveDataSanitizer {
         return redacted;
     }
 
+    /// <summary>
+    /// Determines whether a field name is likely to contain a credential.
+    /// </summary>
+    public static bool IsSensitiveName(string name) => SensitiveNameRegex().IsMatch(name);
+
     [GeneratedRegex(@"(://)[^:/@\s]+:[^/@\s]+@", RegexOptions.IgnoreCase)]
     private static partial Regex UrlCredentialsRegex();
+
+    [GeneratedRegex(@"(?i)(password|pwd|token|secret|api[_-]?key|access[_-]?key)")]
+    private static partial Regex SensitiveNameRegex();
 
     [GeneratedRegex(
         @"(?i)\b(password|pwd|token|secret|api[_-]?key|access[_-]?key)\b(\s*=\s*|:\s*)[^;,\s}]+",

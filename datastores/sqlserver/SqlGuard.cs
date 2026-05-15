@@ -39,6 +39,7 @@ public static partial class SqlGuard {
     /// </summary>
     public static void Validate(string sql) {
         string clean = StripComments(sql);
+        string masked = MaskLiterals(clean);
 
         foreach ((Regex pattern, string label) in Forbidden) {
             if (pattern.IsMatch(clean)) {
@@ -46,20 +47,20 @@ public static partial class SqlGuard {
             }
         }
 
-        bool isDelete = DeleteKeywordRegex().IsMatch(clean);
-        bool isUpdate = UpdateKeywordRegex().IsMatch(clean);
+        bool isDelete = DeleteKeywordRegex().IsMatch(masked);
+        bool isUpdate = UpdateKeywordRegex().IsMatch(masked);
 
         if (!isDelete && !isUpdate) {
             return;
         }
 
-        if (!WhereKeywordRegex().IsMatch(clean)) {
+        if (!WhereKeywordRegex().IsMatch(masked)) {
             string op = isDelete ? "DELETE" : "UPDATE";
             throw new InvalidOperationException($"{op} requires a WHERE clause.");
         }
 
         foreach (Regex rx in TrivialWhere) {
-            if (rx.IsMatch(clean)) {
+            if (rx.IsMatch(masked)) {
                 throw new InvalidOperationException("Always-true WHERE conditions are not allowed in DELETE/UPDATE.");
             }
         }

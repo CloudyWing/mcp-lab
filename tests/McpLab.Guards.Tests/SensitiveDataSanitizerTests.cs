@@ -13,4 +13,13 @@ internal sealed class SensitiveDataSanitizerTests {
 
         Assert.That(actual, Is.EqualTo(expected));
     }
+
+    [TestCase("password")]
+    [TestCase("access_token")]
+    [TestCase("api-key")]
+    public void IsSensitiveName_SecretFieldName_ReturnsTrue(string name) {
+        bool actual = SensitiveDataSanitizer.IsSensitiveName(name);
+
+        Assert.That(actual, Is.True);
+    }
 }

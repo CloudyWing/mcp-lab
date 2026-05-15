@@ -134,7 +134,7 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | `blocked` | 輸入被安全規則阻擋 |
 | `error` | 執行失敗或輸入格式錯誤 |
 
-錯誤訊息會遮罩常見機密片段，例如 password、token、secret、API key 與 URL userinfo。
+Tool 回應會遮罩常見機密片段，例如 password、token、secret、API key 與 URL userinfo。
 
 ## Healthcheck
 

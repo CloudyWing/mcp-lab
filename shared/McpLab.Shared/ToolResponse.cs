@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CloudyWing.McpLab.Shared;
 
@@ -42,7 +43,61 @@ public static class ToolResponse {
             ok,
             kind,
             message = SensitiveDataSanitizer.Redact(message),
-            data,
+            data = RedactData(data),
         }, Json);
+    }
+
+    private static JsonNode? RedactData(object? data) {
+        if (data is null) {
+            return null;
+        }
+
+        JsonNode? node = JsonSerializer.SerializeToNode(data, Json);
+        RedactNode(node);
+
+        return node;
+    }
+
+    private static void RedactNode(JsonNode? node) {
+        if (node is null) {
+            return;
+        }
+
+        if (node is JsonArray array) {
+            for (int i = 0; i < array.Count; i++) {
+                JsonNode? item = array[i];
+
+                if (TryRedactStringValue(item, out JsonNode? redacted)) {
+                    array[i] = redacted;
+                } else {
+                    RedactNode(item);
+                }
+            }
+        }
+
+        if (node is JsonObject obj) {
+            KeyValuePair<string, JsonNode?>[] properties = obj.ToArray();
+
+            foreach (KeyValuePair<string, JsonNode?> property in properties) {
+                if (SensitiveDataSanitizer.IsSensitiveName(property.Key)) {
+                    obj[property.Key] = JsonValue.Create("***");
+                } else if (TryRedactStringValue(property.Value, out JsonNode? redacted)) {
+                    obj[property.Key] = redacted;
+                } else {
+                    RedactNode(property.Value);
+                }
+            }
+        }
+    }
+
+    private static bool TryRedactStringValue(JsonNode? node, out JsonNode? redacted) {
+        redacted = null;
+
+        if (node is not JsonValue value || !value.TryGetValue(out string? text)) {
+            return false;
+        }
+
+        redacted = JsonValue.Create(SensitiveDataSanitizer.Redact(text));
+        return true;
     }
 }

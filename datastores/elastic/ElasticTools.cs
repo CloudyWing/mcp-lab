@@ -148,7 +148,13 @@ public sealed class ElasticTools {
         [Description("回傳筆數，預設 10")] int size = 0,
         [Description("連線名稱")] string connection = ""
     ) {
-        if (!TryDecodeBase64(queryBodyBase64, out string queryBody, out string error)) {
+        if (!Base64Payload.TryDecodeUtf8(
+            queryBodyBase64,
+            "Payload is empty.",
+            "Decoded payload is empty.",
+            out string queryBody,
+            out string error
+        )) {
             return ToolResponse.Error(error);
         }
 
@@ -227,7 +233,13 @@ public sealed class ElasticTools {
         [Description("文件 ID，省略則自動產生")] string id = "",
         [Description("連線名稱")] string connection = ""
     ) {
-        if (!TryDecodeBase64(documentBase64, out string document, out string error)) {
+        if (!Base64Payload.TryDecodeUtf8(
+            documentBase64,
+            "Payload is empty.",
+            "Decoded payload is empty.",
+            out string document,
+            out string error
+        )) {
             return ToolResponse.Error(error);
         }
 
@@ -312,7 +324,13 @@ public sealed class ElasticTools {
         [Description("Base64 編碼的 JSON 查詢條件")] string queryBodyBase64,
         [Description("連線名稱")] string connection = ""
     ) {
-        if (!TryDecodeBase64(queryBodyBase64, out string queryBody, out string error)) {
+        if (!Base64Payload.TryDecodeUtf8(
+            queryBodyBase64,
+            "Payload is empty.",
+            "Decoded payload is empty.",
+            out string queryBody,
+            out string error
+        )) {
             return ToolResponse.Error(error);
         }
 
@@ -356,62 +374,6 @@ public sealed class ElasticTools {
                 },
             });
         }
-    }
-
-    private static bool TryDecodeBase64(string input, out string value, out string error) {
-        value = string.Empty;
-        error = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(input)) {
-            error = "Payload is empty.";
-            return false;
-        }
-
-        try {
-            string normalized = NormalizeBase64(input);
-            byte[] bytes = Convert.FromBase64String(normalized);
-            value = Encoding.UTF8.GetString(bytes);
-
-            if (string.IsNullOrWhiteSpace(value)) {
-                error = "Decoded payload is empty.";
-                return false;
-            }
-
-            MaybeLogBase64(input, normalized, value);
-            return true;
-        } catch (FormatException) {
-            error = "Invalid Base64.";
-            return false;
-        }
-    }
-
-    private static void MaybeLogBase64(string raw, string normalized, string decoded) {
-        if (Environment.GetEnvironmentVariable("MCP_LOG_BASE64") is not "1") {
-            return;
-        }
-
-        string safeDecoded = decoded.Length <= 500 ? decoded : decoded[..500] + "...";
-        safeDecoded = SensitiveDataSanitizer.Redact(safeDecoded);
-        Console.WriteLine($"[base64] raw={raw}");
-        Console.WriteLine($"[base64] normalized={normalized}");
-        Console.WriteLine($"[base64] decoded={safeDecoded}");
-    }
-
-    private static string NormalizeBase64(string input) {
-        string value = input.Trim()
-            .Replace('-', '+')
-            .Replace('_', '/');
-        int mod = value.Length % 4;
-
-        if (mod == 2) {
-            return value + "==";
-        }
-
-        if (mod == 3) {
-            return value + "=";
-        }
-
-        return value;
     }
 
     private static object? ParseJsonOrText(string body) {

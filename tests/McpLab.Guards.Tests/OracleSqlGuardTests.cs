@@ -8,6 +8,8 @@ internal sealed class OracleSqlGuardTests {
     [TestCase("SELECT * FROM USERS WHERE ROWNUM = 1")]
     [TestCase("DELETE FROM USERS WHERE ID = :id")]
     [TestCase("UPDATE USERS SET DISPLAY_NAME = :displayName WHERE ID = :id")]
+    [TestCase("INSERT INTO AUDIT_LOG(MESSAGE) VALUES ('DELETE requested')")]
+    [TestCase("INSERT INTO AUDIT_LOG(MESSAGE) VALUES ('UPDATE requested')")]
     [TestCase("/* DROP TABLE USERS */ SELECT 1 FROM DUAL")]
     [TestCase("-- DROP TABLE USERS\r\nSELECT 1 FROM DUAL")]
     public void Validate_ReadOrScopedWriteSql_DoesNotThrow(string sql) {

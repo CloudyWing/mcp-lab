@@ -8,6 +8,8 @@ internal sealed class SqlServerSqlGuardTests {
     [TestCase("SELECT TOP 1 * FROM dbo.Users")]
     [TestCase("DELETE FROM dbo.Users WHERE Id = @id")]
     [TestCase("UPDATE dbo.Users SET DisplayName = @displayName WHERE Id = @id")]
+    [TestCase("INSERT INTO dbo.AuditLog(Message) VALUES ('DELETE requested')")]
+    [TestCase("INSERT INTO dbo.AuditLog(Message) VALUES ('UPDATE requested')")]
     [TestCase("/* DROP TABLE dbo.Users */ SELECT 1")]
     [TestCase("-- DROP TABLE dbo.Users\r\nSELECT 1")]
     public void Validate_ReadOrScopedWriteSql_DoesNotThrow(string sql) {
