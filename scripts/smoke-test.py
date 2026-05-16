@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import smtplib
@@ -23,10 +24,12 @@ PROTOCOL_VERSION = "2025-06-18"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_SERVICES = [
+    "mcp-api-contract",
     "mcp-sql-server",
     "mcp-oracle",
     "mcp-elasticsearch",
     "mcp-redis",
+    "mcp-oidc",
     "mcp-mosquitto",
     "mcp-rabbitmq",
     "mcp-mailpit",
@@ -200,6 +203,10 @@ def main() -> int:
     runner.check("container security policy is enforced", check_container_security)
     runner.check("HTTP health endpoints are available", lambda: check_health_endpoints(status_by_service))
     runner.check(
+        "API Contract MCP is reachable",
+        lambda: check_api_contract_mcp(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
         "SQL Server MCP query is read-only and connected",
         lambda: check_sql_server(status_by_service, args.timeout_seconds),
     )
@@ -212,6 +219,10 @@ def main() -> int:
         lambda: check_elasticsearch(status_by_service, args.timeout_seconds),
     )
     runner.check("Redis MCP is connected", lambda: check_ping(status_by_service, "mcp-redis", args.timeout_seconds))
+    runner.check(
+        "OIDC MCP can inspect JWT locally",
+        lambda: check_oidc_mcp(status_by_service, args.timeout_seconds),
+    )
     runner.check(
         "Mosquitto MCP is connected",
         lambda: check_ping(status_by_service, "mcp-mosquitto", args.timeout_seconds),
@@ -363,6 +374,30 @@ def check_elasticsearch(status_by_service: dict[str, dict[str, Any]], timeout_se
         raise SmokeError(f"Elasticsearch cluster status is red: {json.dumps(health)}")
 
 
+def check_api_contract_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    client = create_client(status_by_service, "mcp-api-contract", timeout_seconds)
+    expect_tool_ok(client.call_tool("list_connections"))
+
+
+def check_oidc_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    client = create_client(status_by_service, "mcp-oidc", timeout_seconds)
+    expect_tool_ok(client.call_tool("list_connections"))
+
+    response = expect_tool_ok(
+        client.call_tool(
+            "inspect_jwt",
+            {
+                "token": create_unsigned_jwt(),
+                "includeClaims": True,
+                "claimLimit": 20,
+            },
+        )
+    )
+    data = response.get("data") or {}
+    assert_contains(json.dumps(data), "https://issuer.example.test")
+    assert_contains(json.dumps(data), "subject-1")
+
+
 def check_ping(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> None:
     client = create_client(status_by_service, service, timeout_seconds)
     expect_tool_ok(client.call_tool("ping_connection"))
@@ -501,6 +536,24 @@ def send_smoke_email(subject: str, recipient: str) -> None:
             smtp.send_message(message)
     except OSError as exc:
         raise SmokeError(f"Mailpit SMTP endpoint {host}:{port} is not reachable: {exc}") from exc
+
+
+def create_unsigned_jwt() -> str:
+    header = {"alg": "none", "typ": "JWT"}
+    payload = {
+        "iss": "https://issuer.example.test",
+        "sub": "subject-1",
+        "aud": "api://default",
+        "scope": "openid profile",
+        "exp": 4102444800,
+    }
+
+    return f"{base64url_json(header)}.{base64url_json(payload)}."
+
+
+def base64url_json(value: dict[str, Any]) -> str:
+    raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 def create_client(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> McpClient:

@@ -14,10 +14,12 @@
 
 | 變數 | 預設值 | 說明 |
 | --- | --- | --- |
+| `MCP_API_CONTRACT_PORT` | `9851` |  |
 | `MCP_SQL_SERVER_PORT` | `9800` |  |
 | `MCP_ORACLE_PORT` | `9801` |  |
 | `MCP_ELASTICSEARCH_PORT` | `9802` |  |
 | `MCP_REDIS_PORT` | `9803` |  |
+| `MCP_OIDC_PORT` | `9850` |  |
 | `MCP_MOSQUITTO_PORT` | `9820` |  |
 | `MCP_RABBITMQ_PORT` | `9821` |  |
 | `MCP_MAILPIT_PORT` | `9830` |  |
@@ -65,6 +67,22 @@
 | `MSSQL_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
 | `MSSQL_CONN_PROD_DATABASE` | `` | 預設資料庫 |
 
+## API Contract 連線
+
+提醒：`ALIAS` 為大寫英數，建議用英文代號，例如 `LOCAL`、`PROD`。
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `API_CONTRACT_CONN_PROD_NAME` | `` | 連線名稱 |
+| `API_CONTRACT_CONN_PROD_SPEC_URL` | `` | OpenAPI JSON/YAML URL |
+| `API_CONTRACT_CONN_PROD_SPEC_PATH` | `` | 容器內可讀取的 OpenAPI JSON/YAML 路徑 |
+| `API_CONTRACT_CONN_PROD_BASE_URL` | `` | API base URL，未設定時使用 spec 的 `servers[0].url` |
+| `API_CONTRACT_CONN_PROD_INVOKE_ENABLED` | `false` | 是否啟用 `invoke_endpoint` |
+| `API_CONTRACT_CONN_PROD_ALLOWED_METHODS` | `GET,HEAD,OPTIONS` | `invoke_endpoint` 允許的 HTTP methods |
+| `API_CONTRACT_CONN_PROD_SSL_SKIP_VERIFY` | `false` | 是否略過 HTTPS 憑證驗證 |
+| `API_CONTRACT_CONN_PROD_AUTH_HEADER_NAME` | `` | 固定 auth header 名稱 |
+| `API_CONTRACT_CONN_PROD_AUTH_HEADER_VALUE` | `` | 固定 auth header 值 |
+
 ## Oracle 連線
 
 提醒：`ALIAS` 為大寫英數，建議用英文代號，例如 `LOCAL`、`PROD`。
@@ -101,6 +119,18 @@
 | `REDIS_CONN_PROD_PORT` | `6379` | 連線埠 |
 | `REDIS_CONN_PROD_DATABASE` | `` | 預設資料庫 |
 | `REDIS_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
+
+## OIDC 連線
+
+提醒：`ALIAS` 為大寫英數，建議用英文代號，例如 `LOCAL`、`PROD`。
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `OIDC_CONN_PROD_NAME` | `` | 連線名稱 |
+| `OIDC_CONN_PROD_ISSUER` | `` | OIDC issuer URL |
+| `OIDC_CONN_PROD_DISCOVERY_URL` | `` | discovery document URL，未設定時使用 `{ISSUER}/.well-known/openid-configuration` |
+| `OIDC_CONN_PROD_AUDIENCE` | `` | 預設 JWT audience，未設定時 `validate_jwt` 不驗證 audience |
+| `OIDC_CONN_PROD_REQUIRE_HTTPS_METADATA` | `true` | 是否要求 discovery 與 JWKS 使用 HTTPS |
 
 ## MQTT 連線
 
@@ -154,5 +184,3 @@
 | `DOCUMENT_XLSX_MAX_ROWS_LIMIT` | `10000` | `read_document` 讀取 XLSX 時允許的最大列數 |
 | `DOCUMENT_XLSX_MAX_CELLS` | `20000` | `read_document` 讀取 XLSX 時的預設最大儲存格數 |
 | `DOCUMENT_XLSX_MAX_CELLS_LIMIT` | `200000` | `read_document` 讀取 XLSX 時允許的最大儲存格數 |
-
-

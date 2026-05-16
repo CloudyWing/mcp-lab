@@ -1,0 +1,28 @@
+services:
+  mcp-oidc:
+    container_name: mcp-oidc
+    build:
+      context: ../..
+      dockerfile: identity/oidc/Dockerfile
+      args:
+        DOTNET_TAG: ${DOTNET_TAG:-10.0}
+    extends:
+      file: ../../policies/base.yml
+      service: default-policy
+    env_file:
+      - path: ../../.env
+        required: false
+    ports:
+      - "${MCP_OIDC_PORT:-9850}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - shared_net

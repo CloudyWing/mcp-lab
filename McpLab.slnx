@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/api/">
+    <Project Path="api/contract/McpLab.ApiContract.csproj" />
+  </Folder>
   <Folder Name="/datastores/" />
   <Folder Name="/datastores/elastic/">
     <Project Path="datastores/elastic/McpLab.Elastic.csproj" />
@@ -11,6 +14,9 @@
   </Folder>
   <Folder Name="/datastores/sqlserver/">
     <Project Path="datastores/sqlserver/McpLab.SqlServer.csproj" />
+  </Folder>
+  <Folder Name="/identity/">
+    <Project Path="identity/oidc/McpLab.Oidc.csproj" />
   </Folder>
   <Folder Name="/messaging/" />
   <Folder Name="/messaging/mosquitto/">

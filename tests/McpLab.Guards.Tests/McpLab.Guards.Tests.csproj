@@ -18,10 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\api\contract\McpLab.ApiContract.csproj" />
     <ProjectReference Include="..\..\datastores\elastic\McpLab.Elastic.csproj" />
     <ProjectReference Include="..\..\datastores\oracle\McpLab.Oracle.csproj" />
     <ProjectReference Include="..\..\datastores\redis\McpLab.Redis.csproj" />
     <ProjectReference Include="..\..\datastores\sqlserver\McpLab.SqlServer.csproj" />
+    <ProjectReference Include="..\..\identity\oidc\McpLab.Oidc.csproj" />
     <ProjectReference Include="..\..\messaging\mosquitto\McpLab.Mosquitto.csproj" />
     <ProjectReference Include="..\..\messaging\rabbitmq\McpLab.RabbitMq.csproj" />
     <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />

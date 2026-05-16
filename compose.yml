@@ -1,6 +1,10 @@
 name: ${COMPOSE_PROJECT_NAME:-mcp-lab}
 
 include:
+  # API
+  - path: api/contract/compose.yml
+    env_file: .env
+
   # Datastores
   - path: datastores/sqlserver/compose.yml
     env_file: .env
@@ -9,6 +13,10 @@ include:
   - path: datastores/elastic/compose.yml
     env_file: .env
   - path: datastores/redis/compose.yml
+    env_file: .env
+
+  # Identity
+  - path: identity/oidc/compose.yml
     env_file: .env
 
   # Messaging
