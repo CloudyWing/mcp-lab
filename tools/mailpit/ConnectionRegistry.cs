@@ -1,3 +1,6 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+using Microsoft.Extensions.Logging;
+
 namespace CloudyWing.McpLab.Mailpit;
 
 /// <summary>
@@ -10,36 +13,56 @@ public sealed partial class ConnectionRegistry {
     public const string ClientKey = "mailpit";
 
     private readonly IHttpClientFactory httpClientFactory;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
+    private readonly ILogger<ConnectionRegistry> logger;
+    private IReadOnlyDictionary<string, ConnectionConfig> current =
+        new Dictionary<string, ConnectionConfig>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Initializes a new instance of <see cref="ConnectionRegistry"/> by loading environment variables.
+    /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
     /// </summary>
-    public ConnectionRegistry(IHttpClientFactory httpClientFactory) {
+    /// <param name="httpClientFactory">The HTTP client factory.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider.</param>
+    /// <param name="logger">The logger.</param>
+    public ConnectionRegistry(
+        IHttpClientFactory httpClientFactory,
+        IDotEnvSnapshotProvider snapshotProvider,
+        ILogger<ConnectionRegistry> logger
+    ) {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+        ArgumentNullException.ThrowIfNull(logger);
+
         this.httpClientFactory = httpClientFactory;
-        All = Load();
+        this.snapshotProvider = snapshotProvider;
+        this.logger = logger;
+        Rebuild(snapshotProvider.Current);
+        this.snapshotProvider.Reloaded += HandleDotEnvReloaded;
     }
 
     /// <summary>
     /// Gets all loaded connections, keyed by connection name (case-insensitive).
     /// </summary>
-    public IReadOnlyDictionary<string, ConnectionConfig> All { get; }
+    public IReadOnlyDictionary<string, ConnectionConfig> All => Volatile.Read(ref current);
 
     /// <summary>
     /// Returns the named connection, or the first available when <paramref name="name"/> is empty.
     /// </summary>
     public ConnectionConfig Get(string? name) {
-        if (All.Count == 0) {
+        IReadOnlyDictionary<string, ConnectionConfig> all = All;
+
+        if (all.Count == 0) {
             throw new InvalidOperationException("No Mailpit connections configured. Set MAILPIT_CONN_<name>_URL.");
         }
 
         if (string.IsNullOrWhiteSpace(name)) {
-            return All.Values.First();
+            return all.Values.First();
         }
 
-        return All.TryGetValue(name, out ConnectionConfig? cfg)
+        return all.TryGetValue(name, out ConnectionConfig? cfg)
             ? cfg
             : throw new KeyNotFoundException(
-                $"Connection '{name}' not found. Available: {string.Join(", ", All.Keys)}"
+                $"Connection '{name}' not found. Available: {string.Join(", ", all.Keys)}"
             );
     }
 
@@ -55,9 +78,14 @@ public sealed partial class ConnectionRegistry {
         return http;
     }
 
-    private static Dictionary<string, ConnectionConfig> Load() {
+    private void HandleDotEnvReloaded(object? sender, DotEnvReloadedEventArgs e) {
+        Rebuild(e.Current);
+    }
+
+    private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
+        IReadOnlyDictionary<string, ConnectionConfig> previous = All;
         Dictionary<string, Dictionary<string, string>> buckets =
-            EnvironmentConnectionSettings.LoadBuckets(EnvRegex());
+            EnvironmentConnectionSettings.LoadBuckets(snapshot, EnvRegex());
 
         Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
 
@@ -66,15 +94,37 @@ public sealed partial class ConnectionRegistry {
                 continue;
             }
 
-            string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MAILPIT_CONN", "name");
-            string url = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MAILPIT_CONN", "url");
+            try {
+                ConnectionConfig config = BuildConfig(aliasKey, cfg);
+                result[config.Name] = config;
+            } catch (InvalidOperationException ex) {
+                string configuredName = EnvironmentConnectionSettings.GetString(cfg, "name");
 
-            result[name] = new ConnectionConfig(name, url);
+                if (!string.IsNullOrWhiteSpace(configuredName) && previous.TryGetValue(configuredName, out ConnectionConfig? previousConfig)) {
+                    result[configuredName] = previousConfig;
+                }
+
+                LogConnectionRebuildFailed(logger, aliasKey, ex.Message);
+            }
         }
 
-        return result;
+        Volatile.Write(ref current, result);
+    }
+
+    private static ConnectionConfig BuildConfig(string aliasKey, IReadOnlyDictionary<string, string> cfg) {
+        string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MAILPIT_CONN", "name");
+        string url = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "MAILPIT_CONN", "url");
+
+        return new ConnectionConfig(name, url);
     }
 
     [GeneratedRegex(@"^MAILPIT_CONN_([A-Z0-9]+)_([A-Z0-9_]+)$", RegexOptions.Compiled)]
     private static partial Regex EnvRegex();
+
+    [LoggerMessage(
+        EventId = 2701,
+        Level = LogLevel.Warning,
+        Message = "Mailpit connection '{AliasKey}' rebuild failed: {Reason}; previous configuration retained when available"
+    )]
+    private static partial void LogConnectionRebuildFailed(ILogger logger, string aliasKey, string reason);
 }

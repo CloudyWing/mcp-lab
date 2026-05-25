@@ -12,6 +12,10 @@ services:
     env_file:
       - path: ../../.env
         required: false
+    environment:
+      MCPLAB_DOTENV_PATH: /app/.env
+    volumes:
+      - ../../.env:/app/.env:ro
     ports:
       - "${MCP_API_CONTRACT_PORT:-9851}:8080"
     healthcheck:

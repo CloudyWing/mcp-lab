@@ -19,11 +19,13 @@ services:
     mem_limit: 256m
     cpus: 0.5
     environment:
+      MCPLAB_DOTENV_PATH: /app/.env
       MAX_IMAGES: ${DOCUMENT_MAX_IMAGES:-20}
       MAX_TEXT_MB: ${DOCUMENT_MAX_TEXT_MB:-10}
       DOCUMENT_HOST_MOUNT_ROOT: ${DOCUMENT_HOST_MOUNT_ROOT:?Set DOCUMENT_HOST_MOUNT_ROOT}
     volumes:
-      - ${DOCUMENT_HOST_MOUNT_ROOT:?Set DOCUMENT_HOST_MOUNT_ROOT}:/host_root:ro
+      - ../../.env:/app/.env:ro
+      - ${DOCUMENT_HOST_MOUNT_SOURCE:-${DOCUMENT_HOST_MOUNT_ROOT:?Set DOCUMENT_HOST_MOUNT_ROOT}}:/host_root:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

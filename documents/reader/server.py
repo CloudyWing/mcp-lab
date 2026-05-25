@@ -12,40 +12,17 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from dotenv_watcher import DotEnvSnapshot, DotEnvWatcher
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
+
+FastMCPSettings.model_config["env_file"] = None
 
 MOUNT_ROOT = Path("/host_root").resolve()
 RAW_HOST_MOUNT_ROOT = os.environ.get("DOCUMENT_HOST_MOUNT_ROOT", "/").strip()
-
-
-def _get_int_env(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _get_float_env(name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-MAX_IMAGES = _get_int_env("MAX_IMAGES", 20)
-MAX_TEXT_MB = _get_float_env("MAX_TEXT_MB", 10)
-DEFAULT_LIST_LIMIT = _get_int_env("DOCUMENT_LIST_DEFAULT_LIMIT", 100)
-MAX_LIST_LIMIT = _get_int_env("DOCUMENT_LIST_MAX_LIMIT", 1000)
-DEFAULT_LIST_DEPTH = _get_int_env("DOCUMENT_LIST_DEFAULT_DEPTH", 2)
-MAX_LIST_DEPTH = _get_int_env("DOCUMENT_LIST_MAX_DEPTH", 10)
-DEFAULT_SEARCH_LIMIT = _get_int_env("DOCUMENT_SEARCH_DEFAULT_LIMIT", 20)
-MAX_SEARCH_LIMIT = _get_int_env("DOCUMENT_SEARCH_MAX_LIMIT", 200)
-DEFAULT_SEARCH_SCAN_LIMIT = _get_int_env("DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT", 200)
-MAX_SEARCH_SCAN_LIMIT = _get_int_env("DOCUMENT_SEARCH_MAX_SCAN_LIMIT", 2000)
-DEFAULT_XLSX_MAX_ROWS = _get_int_env("DOCUMENT_XLSX_MAX_ROWS", 1000)
-MAX_XLSX_MAX_ROWS = _get_int_env("DOCUMENT_XLSX_MAX_ROWS_LIMIT", 10000)
-DEFAULT_XLSX_MAX_CELLS = _get_int_env("DOCUMENT_XLSX_MAX_CELLS", 20000)
-MAX_XLSX_MAX_CELLS = _get_int_env("DOCUMENT_XLSX_MAX_CELLS_LIMIT", 200000)
+DOTENV_PATH = os.environ.get("MCPLAB_DOTENV_PATH", "/app/.env").strip() or "/app/.env"
+_SNAPSHOT = DotEnvSnapshot.from_environment()
+_WATCHER = DotEnvWatcher(DOTENV_PATH, _SNAPSHOT)
 
 DOCUMENT_EXTS = {".pdf", ".pptx", ".docx", ".xlsx"}
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".svg"}
@@ -60,13 +37,30 @@ mcp = FastMCP(
 
 
 def _normalize_mount_root(raw_root: str) -> str:
-    normalized = raw_root.strip().strip('"').strip("'").replace("\\", "/")
+    return _normalize_absolute_host_path(raw_root) or "/"
+
+
+def _normalize_absolute_host_path(raw_path: str) -> str | None:
+    normalized = raw_path.strip().strip('"').strip("'").replace("\\", "/")
     if not normalized:
-        return "/"
-    if not normalized.startswith("/"):
-        normalized = f"/{normalized}"
-    normalized = normalized.rstrip("/")
-    return normalized or "/"
+        return None
+
+    windows_path = re.match(r"^(?P<drive>[A-Za-z]):/?(?P<tail>.*)$", normalized)
+    if windows_path:
+        drive = windows_path.group("drive").lower()
+        tail = windows_path.group("tail").strip("/")
+        return f"/mnt/{drive}/{tail}".rstrip("/")
+
+    desktop_path = re.match(r"^/run/desktop/mnt/host/(?P<drive>[A-Za-z])(?:/(?P<tail>.*))?$", normalized)
+    if desktop_path:
+        drive = desktop_path.group("drive").lower()
+        tail = (desktop_path.group("tail") or "").strip("/")
+        return f"/mnt/{drive}/{tail}".rstrip("/")
+
+    if normalized.startswith("/"):
+        return normalized.rstrip("/") or "/"
+
+    return None
 
 
 HOST_MOUNT_ROOT = _normalize_mount_root(RAW_HOST_MOUNT_ROOT)
@@ -81,6 +75,80 @@ def _clamp_int(value: int, default: int, minimum: int, maximum: int) -> int:
     if parsed < minimum:
         return default
     return min(parsed, maximum)
+
+
+def _setting_int(names: list[str], default: int, minimum: int, maximum: int) -> int:
+    value = _SNAPSHOT.get_first(names)
+    return _clamp_int(value, default, minimum, maximum)
+
+
+def _setting_float(names: list[str], default: float, minimum: float, maximum: float) -> float:
+    value = _SNAPSHOT.get_first(names)
+
+    try:
+        parsed = float(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+    if parsed < minimum:
+        return default
+    return min(parsed, maximum)
+
+
+def _max_images() -> int:
+    return _setting_int(["DOCUMENT_MAX_IMAGES", "MAX_IMAGES"], 20, 1, 200)
+
+
+def _max_text_mb() -> float:
+    return _setting_float(["DOCUMENT_MAX_TEXT_MB", "MAX_TEXT_MB"], 10, 0, 1024)
+
+
+def _list_max_limit() -> int:
+    return _setting_int(["DOCUMENT_LIST_MAX_LIMIT"], 1000, 1, 100000)
+
+
+def _list_default_limit() -> int:
+    return _setting_int(["DOCUMENT_LIST_DEFAULT_LIMIT"], 100, 1, _list_max_limit())
+
+
+def _list_max_depth() -> int:
+    return _setting_int(["DOCUMENT_LIST_MAX_DEPTH"], 10, 0, 100)
+
+
+def _list_default_depth() -> int:
+    return _setting_int(["DOCUMENT_LIST_DEFAULT_DEPTH"], 2, 0, _list_max_depth())
+
+
+def _search_max_limit() -> int:
+    return _setting_int(["DOCUMENT_SEARCH_MAX_LIMIT"], 200, 1, 100000)
+
+
+def _search_default_limit() -> int:
+    return _setting_int(["DOCUMENT_SEARCH_DEFAULT_LIMIT"], 20, 1, _search_max_limit())
+
+
+def _search_max_scan_limit() -> int:
+    return _setting_int(["DOCUMENT_SEARCH_MAX_SCAN_LIMIT"], 2000, 1, 1000000)
+
+
+def _search_default_scan_limit() -> int:
+    return _setting_int(["DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT"], 200, 1, _search_max_scan_limit())
+
+
+def _xlsx_max_rows_limit() -> int:
+    return _setting_int(["DOCUMENT_XLSX_MAX_ROWS_LIMIT"], 10000, 1, 1000000)
+
+
+def _xlsx_default_max_rows() -> int:
+    return _setting_int(["DOCUMENT_XLSX_MAX_ROWS"], 1000, 1, _xlsx_max_rows_limit())
+
+
+def _xlsx_max_cells_limit() -> int:
+    return _setting_int(["DOCUMENT_XLSX_MAX_CELLS_LIMIT"], 200000, 1, 10000000)
+
+
+def _xlsx_default_max_cells() -> int:
+    return _setting_int(["DOCUMENT_XLSX_MAX_CELLS"], 20000, 1, _xlsx_max_cells_limit())
 
 
 def _map_host_path(source_path: str) -> Path | None:
@@ -102,21 +170,14 @@ def _resolve_path(path: str = ".") -> Path:
     elif normalized.startswith("/host_root/") or normalized == "/host_root":
         target = Path(normalized).resolve()
     else:
-        windows_path = re.match(r"^(?P<drive>[A-Za-z]):[\\/]*(?P<tail>.*)$", normalized)
         mapped_target: Path | None = None
-        if windows_path:
-            drive = windows_path.group("drive").lower()
-            tail = windows_path.group("tail").replace("\\", "/").strip("/")
-            host_style_path = f"/mnt/{drive}"
-            if tail:
-                host_style_path = f"{host_style_path}/{tail}"
+        host_style_path = _normalize_absolute_host_path(normalized)
+
+        if host_style_path is not None:
             mapped_target = _map_host_path(host_style_path)
         else:
             normalized = normalized.replace("\\", "/")
-            if normalized.startswith("/"):
-                mapped_target = _map_host_path(normalized)
-            else:
-                mapped_target = (MOUNT_ROOT / normalized).resolve()
+            mapped_target = (MOUNT_ROOT / normalized).resolve()
 
         if mapped_target is None:
             raise ValueError(f"Path must stay under DOCUMENT_HOST_MOUNT_ROOT: {HOST_MOUNT_ROOT}")
@@ -248,7 +309,7 @@ def _parse_pdf(path: Path, include_images: bool, start_page: int, end_page: int)
         page     = document[i]
         page_num = i + 1
         text     = page.get_text("text").strip()
-        if include_images and len(images_b64) < MAX_IMAGES:
+        if include_images and len(images_b64) < _max_images():
             matrix = fitz.Matrix(1.5, 1.5)
             pixmap = page.get_pixmap(matrix=matrix)
             images_b64.append({"page": page_num, "image": _img_to_b64(pixmap.tobytes("png"))})
@@ -282,7 +343,7 @@ def _parse_pptx(path: Path, include_images: bool, start_page: int, end_page: int
                     line = "".join(run.text for run in para.runs).strip()
                     if line:
                         texts.append(line)
-            if include_images and len(images_b64) < MAX_IMAGES and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
+            if include_images and len(images_b64) < _max_images() and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     img_bytes = shape.image.blob
                     img_fmt   = shape.image.ext.lower().lstrip(".")
@@ -312,7 +373,7 @@ def _parse_docx(path: Path, include_images: bool) -> dict:
     images_b64 = []
     if include_images:
         for rel in doc.part.rels.values():
-            if "image" in rel.reltype and len(images_b64) < MAX_IMAGES:
+            if "image" in rel.reltype and len(images_b64) < _max_images():
                 try:
                     img_bytes = rel.target_part.blob
                     img_fmt   = rel.target_part.content_type.split("/")[-1]
@@ -410,7 +471,8 @@ def _parse_image(path: Path) -> dict:
 
 def _parse_text(path: Path) -> dict:
     size_bytes = path.stat().st_size
-    max_bytes  = int(MAX_TEXT_MB * 1024 * 1024) if MAX_TEXT_MB > 0 else 0
+    max_text_mb = _max_text_mb()
+    max_bytes  = int(max_text_mb * 1024 * 1024) if max_text_mb > 0 else 0
     truncated  = max_bytes > 0 and size_bytes > max_bytes
 
     raw = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
@@ -483,16 +545,37 @@ def resolve_document_path(path: str, limit: int = 10) -> dict:
 
 
 @mcp.tool()
+def list_runtime_limits() -> dict:
+    """回傳目前生效的文件讀取 runtime limit 設定。"""
+    return {
+        "max_images": _max_images(),
+        "max_text_mb": _max_text_mb(),
+        "document_list_default_limit": _list_default_limit(),
+        "document_list_max_limit": _list_max_limit(),
+        "document_list_default_depth": _list_default_depth(),
+        "document_list_max_depth": _list_max_depth(),
+        "document_search_default_limit": _search_default_limit(),
+        "document_search_max_limit": _search_max_limit(),
+        "document_search_default_scan_limit": _search_default_scan_limit(),
+        "document_search_max_scan_limit": _search_max_scan_limit(),
+        "document_xlsx_max_rows": _xlsx_default_max_rows(),
+        "document_xlsx_max_rows_limit": _xlsx_max_rows_limit(),
+        "document_xlsx_max_cells": _xlsx_default_max_cells(),
+        "document_xlsx_max_cells_limit": _xlsx_max_cells_limit(),
+    }
+
+
+@mcp.tool()
 def list_documents(
     subpath: str = ".",
     recursive: bool = False,
-    limit: int = DEFAULT_LIST_LIMIT,
-    max_depth: int = DEFAULT_LIST_DEPTH,
+    limit: int = 0,
+    max_depth: int = -1,
 ) -> dict:
     """列出掛載根目錄下可讀取的檔案清單，預設不遞迴且有回傳上限。"""
 
-    safe_limit = _clamp_int(limit, DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT)
-    safe_depth = _clamp_int(max_depth, DEFAULT_LIST_DEPTH, 0, MAX_LIST_DEPTH)
+    safe_limit = _clamp_int(limit, _list_default_limit(), 1, _list_max_limit())
+    safe_depth = _clamp_int(max_depth, _list_default_depth(), 0, _list_max_depth())
     response = {
         "subpath": subpath,
         "host_mount_root": HOST_MOUNT_ROOT,
@@ -530,8 +613,8 @@ def read_document(
     include_images: bool = True,
     start_page: int = 1,
     end_page: int = 0,
-    xlsx_max_rows: int = DEFAULT_XLSX_MAX_ROWS,
-    xlsx_max_cells: int = DEFAULT_XLSX_MAX_CELLS,
+    xlsx_max_rows: int = 0,
+    xlsx_max_cells: int = 0,
 ) -> str:
     """讀取文件、圖片或文字檔，path 可傳完整 Windows/WSL 路徑或掛載根下相對路徑。
     start_page / end_page 僅適用於 PDF 和 PPTX（1-based，end_page=0 表示讀到末頁）。
@@ -557,8 +640,8 @@ def read_document(
         elif ext == ".docx":
             result = _parse_docx(file_path, include_images)
         elif ext == ".xlsx":
-            safe_rows = _clamp_int(xlsx_max_rows, DEFAULT_XLSX_MAX_ROWS, 1, MAX_XLSX_MAX_ROWS)
-            safe_cells = _clamp_int(xlsx_max_cells, DEFAULT_XLSX_MAX_CELLS, 1, MAX_XLSX_MAX_CELLS)
+            safe_rows = _clamp_int(xlsx_max_rows, _xlsx_default_max_rows(), 1, _xlsx_max_rows_limit())
+            safe_cells = _clamp_int(xlsx_max_cells, _xlsx_default_max_cells(), 1, _xlsx_max_cells_limit())
             result = _parse_xlsx(file_path, safe_rows, safe_cells)
         elif ext in IMAGE_EXTS:
             result = _parse_image(file_path)
@@ -589,15 +672,15 @@ def search_documents(
     keyword: str,
     subpath: str = ".",
     recursive: bool = True,
-    limit: int = DEFAULT_SEARCH_LIMIT,
-    max_files_scanned: int = DEFAULT_SEARCH_SCAN_LIMIT,
-    max_depth: int = DEFAULT_LIST_DEPTH,
+    limit: int = 0,
+    max_files_scanned: int = 0,
+    max_depth: int = -1,
     include_image_ocr: bool = False,
 ) -> dict:
     """在指定路徑下搜尋包含關鍵字的檔案，預設限制掃描數量且不做圖片 OCR。"""
-    safe_limit = _clamp_int(limit, DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT)
-    safe_scan_limit = _clamp_int(max_files_scanned, DEFAULT_SEARCH_SCAN_LIMIT, 1, MAX_SEARCH_SCAN_LIMIT)
-    safe_depth = _clamp_int(max_depth, DEFAULT_LIST_DEPTH, 0, MAX_LIST_DEPTH)
+    safe_limit = _clamp_int(limit, _search_default_limit(), 1, _search_max_limit())
+    safe_scan_limit = _clamp_int(max_files_scanned, _search_default_scan_limit(), 1, _search_max_scan_limit())
+    safe_depth = _clamp_int(max_depth, _list_default_depth(), 0, _list_max_depth())
     response = {
         "keyword": keyword,
         "subpath": subpath,
@@ -657,4 +740,5 @@ def search_documents(
 
 
 if __name__ == "__main__":
+    _WATCHER.start()
     mcp.run(transport="streamable-http")

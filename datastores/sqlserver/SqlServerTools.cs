@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.SqlServer;
 
 /// <summary>
@@ -10,24 +12,33 @@ public sealed class SqlServerTools {
     private const int DefaultMaxRows = 500;
     private const int MaxResultRows = 5000;
     private readonly ConnectionRegistry registry;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SqlServerTools"/> with the specified connection registry.
+    /// Initializes a new instance of <see cref="SqlServerTools"/>.
     /// </summary>
-    public SqlServerTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider.</param>
+    public SqlServerTools(ConnectionRegistry registry, IDotEnvSnapshotProvider snapshotProvider) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+
         this.registry = registry;
+        this.snapshotProvider = snapshotProvider;
     }
 
-    private static int QueryTimeout =>
-        ToolRuntimeOptions.GetEnvironmentInt32(
+    private int QueryTimeout =>
+        ToolRuntimeOptions.GetSnapshotInt32(
+            snapshotProvider.Current,
             ["MSSQL_QUERY_TIMEOUT", "QUERY_TIMEOUT"],
             DefaultQueryTimeoutSeconds,
             1,
             MaxQueryTimeoutSeconds
         );
 
-    private static int MaxRows =>
-        ToolRuntimeOptions.GetEnvironmentInt32(
+    private int MaxRows =>
+        ToolRuntimeOptions.GetSnapshotInt32(
+            snapshotProvider.Current,
             ["MSSQL_MAX_ROWS", "MAX_ROWS"],
             DefaultMaxRows,
             1,
@@ -48,6 +59,16 @@ public sealed class SqlServerTools {
                 default_database = kv.Value.Database,
             })
         );
+
+    /// <summary>
+    /// 列出目前生效的 SQL Server runtime limit 設定。
+    /// </summary>
+    [McpServerTool, Description("列出目前生效的 SQL Server runtime limit 設定")]
+    public string ListRuntimeLimits() =>
+        ToolResponse.Ok(new {
+            query_timeout = QueryTimeout,
+            max_rows = MaxRows,
+        });
 
     /// <summary>
     /// 測試指定連線是否正常（回傳伺服器版本）
@@ -303,7 +324,7 @@ public sealed class SqlServerTools {
         }
     }
 
-    private static object ReadResultSet(SqlDataReader rdr) {
+    private object ReadResultSet(SqlDataReader rdr) {
         int max = MaxRows;
         string[] cols = Enumerable.Range(0, rdr.FieldCount).Select(i => rdr.GetName(i)).ToArray();
         List<IReadOnlyList<string>> rows = [];

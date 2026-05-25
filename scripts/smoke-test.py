@@ -7,9 +7,11 @@ import argparse
 import base64
 import json
 import os
+import re
 import smtplib
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -194,6 +196,11 @@ def main() -> int:
         default=int(os.environ.get("MCP_SMOKE_TIMEOUT_SECONDS", "15")),
         help="Per-request timeout for MCP calls.",
     )
+    parser.add_argument(
+        "--check-hot-reload",
+        action="store_true",
+        help="Temporarily modify MSSQL_CONN_*_HOST in .env and verify list_connections reflects the change.",
+    )
     args = parser.parse_args()
 
     runner = Runner()
@@ -210,6 +217,11 @@ def main() -> int:
         "SQL Server MCP query is read-only and connected",
         lambda: check_sql_server(status_by_service, args.timeout_seconds),
     )
+    if args.check_hot_reload:
+        runner.check(
+            "SQL Server MCP reloads .env connection changes",
+            lambda: check_sql_server_hot_reload(status_by_service, args.timeout_seconds),
+        )
     runner.check(
         "Oracle MCP query is read-only and connected",
         lambda: check_oracle(status_by_service, args.timeout_seconds, args.include_oracle),
@@ -347,6 +359,51 @@ def check_sql_server(status_by_service: dict[str, dict[str, Any]], timeout_secon
 
     blocked = client.call_tool("query", {"sql": "SELECT 1 AS value; DROP TABLE dbo.SmokeTest"})
     expect_tool_kind(blocked, "blocked")
+
+
+def check_sql_server_hot_reload(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        raise SkipCheck(".env does not exist")
+
+    original_text = env_path.read_text(encoding="utf-8-sig")
+    host_match = re.search(r"^(MSSQL_CONN_[A-Z0-9]+_HOST=)([^\r\n]*)", original_text, flags=re.MULTILINE)
+    if not host_match:
+        raise SkipCheck(".env does not contain MSSQL_CONN_*_HOST")
+
+    original_host = host_match.group(2)
+    replacement_host = f"hot-reload-{uuid.uuid4().hex}.invalid"
+    client = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
+
+    try:
+        updated_text = original_text[:host_match.start(2)] + replacement_host + original_text[host_match.end(2):]
+        env_path.write_text(updated_text, encoding="utf-8")
+        wait_for_sql_server_host(client, replacement_host, timeout_seconds)
+    finally:
+        env_path.write_text(original_text, encoding="utf-8")
+
+    wait_for_sql_server_host(client, original_host, timeout_seconds)
+
+
+def wait_for_sql_server_host(client: McpClient, expected_host: str, timeout_seconds: int) -> None:
+    deadline = time.monotonic() + max(timeout_seconds, 3)
+    last_hosts: list[str] = []
+
+    while time.monotonic() < deadline:
+        response = expect_tool_ok(client.call_tool("list_connections"))
+        data = response.get("data") or []
+        last_hosts = [
+            str(item.get("host"))
+            for item in data
+            if isinstance(item, dict) and item.get("host") is not None
+        ]
+
+        if expected_host in last_hosts:
+            return
+
+        time.sleep(0.2)
+
+    raise SmokeError(f"SQL Server list_connections did not report host {expected_host!r}. Last hosts: {last_hosts}")
 
 
 def check_oracle(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int, include_oracle: bool) -> None:

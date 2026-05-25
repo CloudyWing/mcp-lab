@@ -13,6 +13,7 @@ RUN useradd --system --no-create-home --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+COPY dotenv_watcher.py .
 COPY server.py .
 USER appuser
 EXPOSE 8080

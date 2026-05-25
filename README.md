@@ -61,6 +61,14 @@ docker compose up -d --build
 docker compose ps
 ```
 
+## 設定熱重載
+
+各 MCP 服務會把專案根目錄的 `.env` 以唯讀方式掛載到容器內 `/app/.env`，並由服務進程監聽檔案內容。修改 `.env` 後，不需要重啟容器；下一次呼叫 `list_connections()`、`list_runtime_limits()` 或實際查詢工具時會讀取新的 runtime 設定。
+
+熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_GID`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
+
+`.env` 變更後通常會在 1 秒內生效。若 `.env` 語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
+
 ## 測試
 
 單元測試不依賴外部服務，可直接執行：
@@ -73,11 +81,12 @@ dotnet test
 
 ```bash
 python3 scripts/smoke-test.py
+python3 scripts/smoke-test.py --check-hot-reload
 ```
 
 此腳本會檢查 Compose 容器健康狀態、`read_only`、`cap_drop: [ALL]`、`no-new-privileges`、`/tmp`
 tmpfs、非 root 使用者，並呼叫各 MCP 服務的 ping 或唯讀查詢工具。SQL Server 與 Oracle 會驗證
-`query` 工具拒絕同一段輸入中的寫入語句。
+`query` 工具拒絕同一段輸入中的寫入語句。加入 `--check-hot-reload` 時，腳本會暫時修改 `.env` 中第一個 `MSSQL_CONN_*_HOST`，確認 `list_connections()` 在 1 秒內反映新值後還原原檔。
 
 Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `.env` 已設定可查詢的 Oracle 連線，可明確啟用：
 
@@ -118,6 +127,9 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | Oracle | `ORACLE_QUERY_TIMEOUT` / `QUERY_TIMEOUT` | 60 秒 | 300 秒 |
 | Oracle | `ORACLE_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
 | Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
+| Redis | `REDIS_MAX_ROWS` / `MAX_ROWS` | 100 | 1000 |
+
+可用 `list_runtime_limits()` 查詢 SQL Server、Oracle、Elasticsearch、Redis 與 Reader 目前生效的限制值。
 
 ## MCP Tool 回應格式
 
@@ -295,9 +307,11 @@ Base64: U0VMRUNUICdhbHBoYScgQVMgbmFtZQ==
 ### 基本設定
 
 ```env
-DOCUMENT_HOST_MOUNT_ROOT=/mnt/c/Users/<你的帳號>/Documents
+DOCUMENT_HOST_MOUNT_ROOT=C:/Users/<你的帳號>/Documents
 DOCUMENT_MAX_TEXT_MB=10
 ```
+
+`DOCUMENT_HOST_MOUNT_ROOT` 是 Reader 對外接受與回傳的 host 路徑根。若 Docker Compose 實際需要使用不同格式掛載同一個目錄，可另外設定 `DOCUMENT_HOST_MOUNT_SOURCE`。例如從 Windows PowerShell 使用 Docker Desktop 啟動時，`DOCUMENT_HOST_MOUNT_SOURCE=C:/Workspace` 會比 `/mnt/c/Workspace` 更穩定。
 
 Windows 路徑與 WSL 路徑均可直接傳入：
 
@@ -328,6 +342,7 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 
 ### 啟動注意事項
 
+- 從 Windows PowerShell 使用 Docker Desktop 啟動時，建議把 Windows 目錄寫成 `C:/Workspace`。
 - 若 `DOCUMENT_HOST_MOUNT_ROOT` 是 WSL 路徑（如 `/mnt/c/...`、`/home/...`），請從 WSL shell 執行 `docker compose up`。
 - 直接從 Windows PowerShell 啟動時，容器在某些環境下可能只看到空目錄。
 
@@ -347,6 +362,7 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 | --- | --- |
 | `get_document_root` | 查詢目前掛載根目錄與支援格式清單 |
 | `resolve_document_path` | 驗證指定路徑是否可讀，或回傳同目錄下符合前綴的候選完整路徑 |
+| `list_runtime_limits` | 查詢目前生效的文件讀取與搜尋限制 |
 | `list_documents` | 以完整 Windows/WSL 路徑或相對路徑列出可讀取檔案，預設不遞迴且有回傳上限 |
 | `read_document` | 以完整 Windows/WSL 路徑或相對路徑讀取指定檔案（含圖片） |
 | `read_document_text_only` | 僅讀取文字內容 |

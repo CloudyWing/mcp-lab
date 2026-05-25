@@ -2,6 +2,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
 using CloudyWing.McpLab.Oidc;
+using CloudyWing.McpLab.Shared.DotEnv;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -19,7 +21,7 @@ internal sealed class OidcJwtInspectorTests {
     public void InspectJwt_ValidReadableToken_ReturnsClaimSummary() {
         string token = CreateUnsignedToken();
         OidcTools tools = new(
-            new ConnectionRegistry(),
+            CreateConnectionRegistry(),
             new OidcDocumentClient(Substitute.For<IHttpClientFactory>())
         );
 
@@ -43,7 +45,7 @@ internal sealed class OidcJwtInspectorTests {
     [Test]
     public void InspectJwt_InvalidToken_ReturnsErrorEnvelope() {
         OidcTools tools = new(
-            new ConnectionRegistry(),
+            CreateConnectionRegistry(),
             new OidcDocumentClient(Substitute.For<IHttpClientFactory>())
         );
 
@@ -71,5 +73,26 @@ internal sealed class OidcJwtInspectorTests {
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static ConnectionRegistry CreateConnectionRegistry() =>
+        new(
+            new TestDotEnvSnapshotProvider(new Dictionary<string, string>(StringComparer.Ordinal)),
+            Substitute.For<ILogger<ConnectionRegistry>>()
+        );
+
+    private sealed class TestDotEnvSnapshotProvider : IDotEnvSnapshotProvider {
+        public TestDotEnvSnapshotProvider(IReadOnlyDictionary<string, string> current) {
+            Current = current;
+        }
+
+        public IReadOnlyDictionary<string, string> Current { get; }
+
+        public event EventHandler<DotEnvReloadedEventArgs>? Reloaded {
+            add {
+            }
+            remove {
+            }
+        }
     }
 }

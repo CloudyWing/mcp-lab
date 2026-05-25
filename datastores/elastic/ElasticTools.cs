@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.Elastic;
 
 /// <summary>
@@ -10,16 +12,24 @@ public sealed class ElasticTools {
     private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private static readonly string[] Value = ["*"];
     private readonly ConnectionRegistry registry;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="ElasticTools"/> with the specified connection registry.
+    /// Initializes a new instance of <see cref="ElasticTools"/>.
     /// </summary>
-    public ElasticTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider.</param>
+    public ElasticTools(ConnectionRegistry registry, IDotEnvSnapshotProvider snapshotProvider) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+
         this.registry = registry;
+        this.snapshotProvider = snapshotProvider;
     }
 
-    private static int DefaultSize =>
-        ToolRuntimeOptions.GetEnvironmentInt32(
+    private int SearchSize =>
+        ToolRuntimeOptions.GetSnapshotInt32(
+            snapshotProvider.Current,
             ["ES_SEARCH_SIZE", "MAX_ROWS"],
             DefaultSearchSize,
             1,
@@ -35,6 +45,15 @@ public sealed class ElasticTools {
             registry.All.Select(kv => new { name = kv.Key, url = kv.Value.Url, user = kv.Value.User }),
             "Configured Elasticsearch connections."
         );
+
+    /// <summary>
+    /// 列出目前生效的 Elasticsearch runtime limit 設定。
+    /// </summary>
+    [McpServerTool, Description("列出目前生效的 Elasticsearch runtime limit 設定")]
+    public string ListRuntimeLimits() =>
+        ToolResponse.Ok(new {
+            search_size = SearchSize,
+        });
 
     /// <summary>
     /// 測試 Elasticsearch 連線（回傳叢集名稱與版本）
@@ -164,7 +183,7 @@ public sealed class ElasticTools {
     private async Task<string> RunSearch(string index, string queryBody, int size, string connection) {
         int safeSize = ToolRuntimeOptions.NormalizeRequestedInt32(
             size,
-            DefaultSize,
+            SearchSize,
             1,
             MaxSearchSize
         );

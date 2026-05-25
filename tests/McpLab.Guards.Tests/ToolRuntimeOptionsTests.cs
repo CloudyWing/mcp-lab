@@ -63,6 +63,41 @@ internal sealed class ToolRuntimeOptionsTests {
     }
 
     [Test]
+    public void GetSnapshotInt32_PrimaryConfigured_ReturnsPrimaryValue() {
+        Dictionary<string, string> snapshot = new(StringComparer.Ordinal) {
+            ["MCP_LAB_TEST_PRIMARY"] = "20",
+            ["MCP_LAB_TEST_FALLBACK"] = "30",
+        };
+
+        int actual = ToolRuntimeOptions.GetSnapshotInt32(
+            snapshot,
+            ["MCP_LAB_TEST_PRIMARY", "MCP_LAB_TEST_FALLBACK"],
+            10,
+            1,
+            100
+        );
+
+        Assert.That(actual, Is.EqualTo(20));
+    }
+
+    [Test]
+    public void GetSnapshotInt32_PrimaryMissing_ReturnsFallbackValue() {
+        Dictionary<string, string> snapshot = new(StringComparer.Ordinal) {
+            ["MCP_LAB_TEST_FALLBACK"] = "30",
+        };
+
+        int actual = ToolRuntimeOptions.GetSnapshotInt32(
+            snapshot,
+            ["MCP_LAB_TEST_PRIMARY", "MCP_LAB_TEST_FALLBACK"],
+            10,
+            1,
+            100
+        );
+
+        Assert.That(actual, Is.EqualTo(30));
+    }
+
+    [Test]
     public void NormalizeInt32_DefaultOutsideBounds_ThrowsArgumentOutOfRangeException() {
         Assert.Throws<ArgumentOutOfRangeException>(
             () => ToolRuntimeOptions.NormalizeInt32("5", 0, 1, 100)

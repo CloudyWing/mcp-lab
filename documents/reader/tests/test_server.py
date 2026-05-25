@@ -23,12 +23,19 @@ def _load_server_module():
     mcp_module = types.ModuleType("mcp")
     server_module = types.ModuleType("mcp.server")
     fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fastmcp_server_module = types.ModuleType("mcp.server.fastmcp.server")
+
+    class FakeSettings:
+        model_config = {"env_file": ".env"}
+
     fastmcp_module.FastMCP = FakeFastMCP
+    fastmcp_server_module.Settings = FakeSettings
     server_module.fastmcp = fastmcp_module
     mcp_module.server = server_module
     sys.modules.setdefault("mcp", mcp_module)
     sys.modules.setdefault("mcp.server", server_module)
     sys.modules.setdefault("mcp.server.fastmcp", fastmcp_module)
+    sys.modules.setdefault("mcp.server.fastmcp.server", fastmcp_server_module)
 
     if "chardet" not in sys.modules:
         chardet_module = types.ModuleType("chardet")
@@ -36,6 +43,10 @@ def _load_server_module():
         sys.modules["chardet"] = chardet_module
 
     module_path = Path(__file__).resolve().parents[1] / "server.py"
+    module_dir = str(module_path.parent)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+
     spec = importlib.util.spec_from_file_location("mcp_reader_server", module_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -51,6 +62,7 @@ class ReaderServerTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name).resolve()
         server.MOUNT_ROOT = self.root
         server.HOST_MOUNT_ROOT = "/mnt/c/docs"
+        server._SNAPSHOT.update({})
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -61,6 +73,26 @@ class ReaderServerTests(unittest.TestCase):
         target.write_text("content", encoding="utf-8")
 
         resolved = server._resolve_path(r"C:\docs\notes\sample.md")
+
+        self.assertEqual(target, resolved)
+
+    def test_normalize_mount_root_accepts_windows_drive_path(self):
+        actual = server._normalize_mount_root(r"C:\Workspace\Projects")
+
+        self.assertEqual("/mnt/c/Workspace/Projects", actual)
+
+    def test_normalize_mount_root_accepts_docker_desktop_host_path(self):
+        actual = server._normalize_mount_root("/run/desktop/mnt/host/c/Workspace/Projects")
+
+        self.assertEqual("/mnt/c/Workspace/Projects", actual)
+
+    def test_resolve_windows_path_when_mount_root_is_windows_drive_path(self):
+        target = self.root / "Projects" / "ECK_NIS" / "sample.pdf"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"%PDF-1.7")
+        server.HOST_MOUNT_ROOT = server._normalize_mount_root("C:/Workspace")
+
+        resolved = server._resolve_path(r"C:\Workspace\Projects\ECK_NIS\sample.pdf")
 
         self.assertEqual(target, resolved)
 
@@ -108,8 +140,31 @@ class ReaderServerTests(unittest.TestCase):
 
         result = server.list_documents(limit="bad")
 
-        self.assertEqual(server.DEFAULT_LIST_LIMIT, result["limit"])
+        self.assertEqual(100, result["limit"])
         self.assertEqual(1, result["returned_count"])
+
+    def test_list_documents_uses_snapshot_default_limit(self):
+        (self.root / "a.md").write_text("a", encoding="utf-8")
+        (self.root / "b.md").write_text("b", encoding="utf-8")
+        (self.root / "c.md").write_text("c", encoding="utf-8")
+        server._SNAPSHOT.update({"DOCUMENT_LIST_DEFAULT_LIMIT": "2"})
+
+        result = server.list_documents()
+
+        self.assertEqual(2, result["limit"])
+        self.assertEqual(2, result["returned_count"])
+        self.assertTrue(result["truncated"])
+
+    def test_list_runtime_limits_returns_snapshot_values(self):
+        server._SNAPSHOT.update({
+            "DOCUMENT_LIST_DEFAULT_LIMIT": "25",
+            "DOCUMENT_MAX_TEXT_MB": "5",
+        })
+
+        result = server.list_runtime_limits()
+
+        self.assertEqual(25, result["document_list_default_limit"])
+        self.assertEqual(5, result["max_text_mb"])
 
     def test_search_documents_limits_results_and_reports_truncation(self):
         (self.root / "a.md").write_text("needle one", encoding="utf-8")

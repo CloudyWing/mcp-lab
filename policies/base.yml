@@ -11,6 +11,7 @@ services:
     read_only: true
     cap_drop:
       - ALL
+    user: "${MCPLAB_RUNTIME_UID:-1000}:${MCPLAB_RUNTIME_GID:-1000}"
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
     environment:

@@ -7,12 +7,19 @@ namespace CloudyWing.McpLab.Redis;
 public sealed class RedisTools {
     private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private readonly ConnectionRegistry registry;
+    private readonly RedisToolLimits limits;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="RedisTools"/> with the specified connection registry.
+    /// Initializes a new instance of <see cref="RedisTools"/>.
     /// </summary>
-    public RedisTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="limits">The Redis tool limits.</param>
+    public RedisTools(ConnectionRegistry registry, RedisToolLimits limits) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(limits);
+
         this.registry = registry;
+        this.limits = limits;
     }
 
     /// <summary>
@@ -28,6 +35,15 @@ public sealed class RedisTools {
                 database = kv.Value.Database,
             })
         );
+
+    /// <summary>
+    /// 列出目前生效的 Redis runtime limit 設定。
+    /// </summary>
+    [McpServerTool, Description("列出目前生效的 Redis runtime limit 設定")]
+    public string ListRuntimeLimits() =>
+        ToolResponse.Ok(new {
+            max_rows = limits.KeyCount,
+        });
 
     /// <summary>
     /// 測試 Redis 連線是否正常（PING）
@@ -59,7 +75,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            int safeCount = RedisToolLimits.NormalizeKeyCount(count);
+            int safeCount = limits.NormalizeKeyCount(count);
             using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IServer server = mux.GetServers().First();
             List<string> keys = [];
@@ -205,7 +221,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            if (!RedisToolLimits.IsSetKeyTtlValid(ttlSeconds)) {
+            if (!limits.IsSetKeyTtlValid(ttlSeconds)) {
                 return ToolResponse.Error("TTL seconds must be zero or greater.");
             }
 
@@ -267,7 +283,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            if (!RedisToolLimits.IsExpireTtlValid(ttlSeconds)) {
+            if (!limits.IsExpireTtlValid(ttlSeconds)) {
                 return ToolResponse.Error("TTL seconds must be greater than zero.");
             }
 

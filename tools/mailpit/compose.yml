@@ -13,8 +13,11 @@ services:
       - path: ../../.env
         required: false
     environment:
+      MCPLAB_DOTENV_PATH: /app/.env
       MAILPIT_CONN_DEFAULT_NAME: ${MAILPIT_CONN_DEFAULT_NAME:-default}
       MAILPIT_CONN_DEFAULT_URL: ${MAILPIT_CONN_DEFAULT_URL:-http://host.docker.internal:8025}
+    volumes:
+      - ../../.env:/app/.env:ro
     ports:
       - "${MCP_MAILPIT_PORT:-9830}:8080"
     healthcheck:

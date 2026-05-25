@@ -1,5 +1,20 @@
 # 環境變數
 
+## 熱重載分類
+
+| 變數或模式 | 熱重載 | 說明 |
+| --- | --- | --- |
+| `*_CONN_*` | runtime | 各 MCP 服務的連線設定。修改 `.env` 後，下一次呼叫 `list_connections()` 或實際工具時生效 |
+| `QUERY_TIMEOUT`、`*_QUERY_TIMEOUT` | runtime | SQL Server 與 Oracle 查詢逾時秒數 |
+| `MAX_ROWS`、`*_MAX_ROWS`、`ES_SEARCH_SIZE` | runtime | 查詢、搜尋或列舉的回傳量限制 |
+| `DOCUMENT_MAX_IMAGES`、`DOCUMENT_MAX_TEXT_MB`、`DOCUMENT_LIST_*`、`DOCUMENT_SEARCH_*`、`DOCUMENT_XLSX_*` | runtime | Reader 文件讀取、列舉、搜尋與 XLSX 解析限制 |
+| `DOCUMENT_HOST_MOUNT_ROOT`、`DOCUMENT_HOST_MOUNT_SOURCE` | build-time | Reader host 路徑根與 Docker volume 掛載來源；修改後需重建或重啟 Compose service |
+| `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `.env` |
+| `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port、Compose project 與容器時區 |
+| `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
+| `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
+
+runtime 變數由容器內服務監聽 `/app/.env` 後套用；build-time 變數由 Docker Compose 或測試腳本在啟動時讀取。
 
 ## 基底映像
 
@@ -32,6 +47,8 @@
 | --- | --- | --- |
 | `DOCKER_GID` | `1001` | native Linux Docker socket 的 group id；Docker Desktop 另會使用 root group 存取 socket |
 | `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 容器內 Docker socket 路徑 |
+| `MCPLAB_RUNTIME_UID` | `1000` | MCP 服務容器的非 root 使用者 UID，需能讀取掛載的 `.env` |
+| `MCPLAB_RUNTIME_GID` | `1000` | MCP 服務容器的非 root 使用者 GID，需能讀取掛載的 `.env` |
 
 ## 資料服務工具限制
 
@@ -169,7 +186,8 @@
 
 | 變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `DOCUMENT_HOST_MOUNT_ROOT` | `` | 容器可讀取的單一 host 掛載根目錄 |
+| `DOCUMENT_HOST_MOUNT_ROOT` | `` | Reader 對外接受與回傳的單一 host 掛載根目錄 |
+| `DOCUMENT_HOST_MOUNT_SOURCE` | `DOCUMENT_HOST_MOUNT_ROOT` | Docker Compose 實際掛載到 `/host_root` 的來源路徑；Docker Desktop 從 Windows PowerShell 啟動時可設為 `C:/Workspace` |
 | `DOCUMENT_MAX_IMAGES` | `20` | 圖片最大回傳張數 |
 | `DOCUMENT_MAX_TEXT_MB` | `10` | 文字內容最大回傳大小（MB），設為 `0` 表示不限制 |
 | `DOCUMENT_LIST_DEFAULT_LIMIT` | `100` | `list_documents` 預設最大回傳檔案數 |

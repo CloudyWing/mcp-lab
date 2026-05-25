@@ -39,6 +39,29 @@ public static class ToolRuntimeOptions {
     }
 
     /// <summary>
+    /// Gets a bounded integer value from the first configured snapshot variable.
+    /// </summary>
+    public static int GetSnapshotInt32(
+        IReadOnlyDictionary<string, string> snapshot,
+        IEnumerable<string> names,
+        int defaultValue,
+        int minValue,
+        int maxValue
+    ) {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(names);
+        ValidateBounds(defaultValue, minValue, maxValue);
+
+        foreach (string name in names) {
+            if (snapshot.TryGetValue(name, out string? value) && !string.IsNullOrWhiteSpace(value)) {
+                return NormalizeInt32(value, defaultValue, minValue, maxValue);
+            }
+        }
+
+        return defaultValue;
+    }
+
+    /// <summary>
     /// Normalizes a string integer value with a fallback and upper bound.
     /// </summary>
     public static int NormalizeInt32(

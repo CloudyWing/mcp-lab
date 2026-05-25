@@ -24,6 +24,25 @@ internal sealed class EnvironmentConnectionSettingsTests {
     }
 
     [Test]
+    public void LoadBuckets_SnapshotVariables_ReturnsLowercaseFields() {
+        Dictionary<string, string> source = new(StringComparer.Ordinal) {
+            ["TEST_CONN_MAIN_NAME"] = "main",
+            ["TEST_CONN_MAIN_HOST"] = "localhost",
+            ["IGNORED"] = "value",
+        };
+
+        Dictionary<string, Dictionary<string, string>> actual =
+            EnvironmentConnectionSettings.LoadBuckets(source, EnvRegex);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(actual.ContainsKey("MAIN"), Is.True);
+            Assert.That(actual["MAIN"]["name"], Is.EqualTo("main"));
+            Assert.That(actual["MAIN"]["host"], Is.EqualTo("localhost"));
+            Assert.That(actual.ContainsKey("IGNORED"), Is.False);
+        }
+    }
+
+    [Test]
     public void GetRequiredString_MissingField_ThrowsInvalidOperationException() {
         Dictionary<string, string> cfg = new(StringComparer.OrdinalIgnoreCase) {
             ["name"] = "main",

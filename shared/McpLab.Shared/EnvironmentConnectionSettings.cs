@@ -10,10 +10,28 @@ public static class EnvironmentConnectionSettings {
     /// Loads environment variables that match a connection naming pattern.
     /// </summary>
     public static Dictionary<string, Dictionary<string, string>> LoadBuckets(Regex envRegex) {
-        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> source = new(StringComparer.Ordinal);
 
         foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
-            string val = Environment.GetEnvironmentVariable(key) ?? "";
+            source[key] = Environment.GetEnvironmentVariable(key) ?? "";
+        }
+
+        return LoadBuckets(source, envRegex);
+    }
+
+    /// <summary>
+    /// Loads source variables that match a connection naming pattern.
+    /// </summary>
+    public static Dictionary<string, Dictionary<string, string>> LoadBuckets(
+        IReadOnlyDictionary<string, string> source,
+        Regex envRegex
+    ) {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(envRegex);
+
+        Dictionary<string, Dictionary<string, string>> buckets = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string key, string val) in source) {
             Match match = envRegex.Match(key);
 
             if (!match.Success) {

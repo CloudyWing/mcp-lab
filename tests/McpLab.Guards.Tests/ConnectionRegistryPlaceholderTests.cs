@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 
+using CloudyWing.McpLab.Shared.DotEnv;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -42,7 +44,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("DATABASE", ""),
         ]);
 
-        SqlServerConnectionRegistry registry = new();
+        SqlServerConnectionRegistry registry = CreateSqlServerRegistryFromEnvironment();
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -60,7 +62,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        ApiContractConnectionRegistry registry = new(httpClientFactory);
+        ApiContractConnectionRegistry registry = CreateApiContractRegistry(httpClientFactory);
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -75,7 +77,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        ApiContractConnectionRegistry registry = new(httpClientFactory);
+        ApiContractConnectionRegistry registry = CreateApiContractRegistry(httpClientFactory);
 
         Assert.That(registry.All["stage"].InvokeEnabled, Is.True);
     }
@@ -88,7 +90,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("SPEC_URL", "https://api.example.test/openapi.json"),
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
-        ApiContractConnectionRegistry registry = new(httpClientFactory);
+        ApiContractConnectionRegistry registry = CreateApiContractRegistry(httpClientFactory);
         ApiContractTools tools = new(registry, new ApiContractSpecSourceClient(registry));
 
         string result = await tools.InvokeEndpoint("/users").ConfigureAwait(false);
@@ -113,7 +115,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("PASSWORD", ""),
         ]);
 
-        OracleConnectionRegistry registry = new();
+        OracleConnectionRegistry registry = CreateOracleRegistry();
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -130,7 +132,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        ElasticConnectionRegistry registry = new(httpClientFactory);
+        ElasticConnectionRegistry registry = CreateElasticRegistry(httpClientFactory);
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -146,7 +148,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("PASSWORD", ""),
         ]);
 
-        RedisConnectionRegistry registry = new();
+        RedisConnectionRegistry registry = CreateRedisRegistry();
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -162,7 +164,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("REQUIRE_HTTPS_METADATA", ""),
         ]);
 
-        OidcConnectionRegistry registry = new();
+        OidcConnectionRegistry registry = CreateOidcRegistry();
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -178,7 +180,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
             ("PASSWORD", ""),
         ]);
 
-        MosquittoConnectionRegistry registry = new();
+        MosquittoConnectionRegistry registry = CreateMosquittoRegistry();
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -195,7 +197,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        RabbitMqConnectionRegistry registry = new(httpClientFactory);
+        RabbitMqConnectionRegistry registry = CreateRabbitMqRegistry(httpClientFactory);
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -209,7 +211,7 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        MailpitConnectionRegistry registry = new(httpClientFactory);
+        MailpitConnectionRegistry registry = CreateMailpitRegistry(httpClientFactory);
 
         Assert.That(registry.All, Is.Empty);
     }
@@ -226,59 +228,136 @@ internal sealed class ConnectionRegistryPlaceholderTests {
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        RabbitMqConnectionRegistry registry = new(httpClientFactory);
+        RabbitMqConnectionRegistry registry = CreateRabbitMqRegistry(httpClientFactory);
 
         Assert.That(registry.All["main"].MgmtPort, Is.EqualTo(15673));
     }
 
     [Test]
-    public void SqlServerConnectionRegistry_PartialVariables_ThrowsInvalidOperationException() {
+    public void SqlServerConnectionRegistry_PartialVariables_IgnoresConnectionWhenNoPreviousConfig() {
         using EnvironmentScope environmentScope = new();
         SetEnvironmentVariables("MSSQL_CONN_PARTIAL", [
             ("NAME", "partial"),
             ("PORT", "1433"),
         ]);
 
-        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => new SqlServerConnectionRegistry()
-        )!;
+        SqlServerConnectionRegistry registry = CreateSqlServerRegistryFromEnvironment();
 
-        Assert.That(exception.Message, Does.Contain("MSSQL_CONN_PARTIAL_HOST is required"));
+        Assert.That(registry.All, Is.Empty);
     }
 
     [Test]
-    public void OidcConnectionRegistry_PartialVariables_ThrowsInvalidOperationException() {
+    public void OidcConnectionRegistry_PartialVariables_IgnoresConnectionWhenNoPreviousConfig() {
         using EnvironmentScope environmentScope = new();
         SetEnvironmentVariables("OIDC_CONN_PARTIAL", [
             ("NAME", "partial"),
             ("AUDIENCE", "api://default"),
         ]);
 
-        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => new OidcConnectionRegistry()
-        )!;
+        OidcConnectionRegistry registry = CreateOidcRegistry();
 
-        Assert.That(exception.Message, Does.Contain("OIDC_CONN_PARTIAL_ISSUER is required"));
+        Assert.That(registry.All, Is.Empty);
     }
 
     [Test]
-    public void ApiContractConnectionRegistry_PartialVariables_ThrowsInvalidOperationException() {
+    public void ApiContractConnectionRegistry_PartialVariables_IgnoresConnectionWhenNoPreviousConfig() {
         using EnvironmentScope environmentScope = new();
         SetEnvironmentVariables("API_CONTRACT_CONN_PARTIAL", [
             ("NAME", "partial"),
         ]);
         IHttpClientFactory httpClientFactory = Substitute.For<IHttpClientFactory>();
 
-        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => new ApiContractConnectionRegistry(httpClientFactory)
-        )!;
+        ApiContractConnectionRegistry registry = CreateApiContractRegistry(httpClientFactory);
 
-        Assert.That(exception.Message, Does.Contain("API_CONTRACT_CONN_PARTIAL_SPEC_URL or SPEC_PATH is required"));
+        Assert.That(registry.All, Is.Empty);
     }
 
     private static void SetEnvironmentVariables(string prefix, IEnumerable<(string Field, string Value)> entries) {
         foreach ((string field, string value) in entries) {
             Environment.SetEnvironmentVariable($"{prefix}_{field}", value);
+        }
+    }
+
+    private static SqlServerConnectionRegistry CreateSqlServerRegistryFromEnvironment() =>
+        new(
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<SqlServerConnectionRegistry>>()
+        );
+
+    private static ApiContractConnectionRegistry CreateApiContractRegistry(IHttpClientFactory httpClientFactory) =>
+        new(
+            httpClientFactory,
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<ApiContractConnectionRegistry>>()
+        );
+
+    private static ElasticConnectionRegistry CreateElasticRegistry(IHttpClientFactory httpClientFactory) =>
+        new(
+            httpClientFactory,
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<ElasticConnectionRegistry>>()
+        );
+
+    private static MailpitConnectionRegistry CreateMailpitRegistry(IHttpClientFactory httpClientFactory) =>
+        new(
+            httpClientFactory,
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<MailpitConnectionRegistry>>()
+        );
+
+    private static RabbitMqConnectionRegistry CreateRabbitMqRegistry(IHttpClientFactory httpClientFactory) =>
+        new(
+            httpClientFactory,
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<RabbitMqConnectionRegistry>>()
+        );
+
+    private static MosquittoConnectionRegistry CreateMosquittoRegistry() =>
+        new(
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<MosquittoConnectionRegistry>>()
+        );
+
+    private static OidcConnectionRegistry CreateOidcRegistry() =>
+        new(
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<OidcConnectionRegistry>>()
+        );
+
+    private static OracleConnectionRegistry CreateOracleRegistry() =>
+        new(
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<OracleConnectionRegistry>>()
+        );
+
+    private static RedisConnectionRegistry CreateRedisRegistry() =>
+        new(
+            new TestDotEnvSnapshotProvider(CaptureEnvironment()),
+            Substitute.For<ILogger<RedisConnectionRegistry>>()
+        );
+
+    private static IReadOnlyDictionary<string, string> CaptureEnvironment() {
+        Dictionary<string, string> snapshot = new(StringComparer.Ordinal);
+
+        foreach (string key in Environment.GetEnvironmentVariables().Keys.OfType<string>()) {
+            snapshot[key] = Environment.GetEnvironmentVariable(key) ?? "";
+        }
+
+        return snapshot;
+    }
+
+    private sealed class TestDotEnvSnapshotProvider : IDotEnvSnapshotProvider {
+        public TestDotEnvSnapshotProvider(IReadOnlyDictionary<string, string> current) {
+            Current = current;
+        }
+
+        public IReadOnlyDictionary<string, string> Current { get; }
+
+        public event EventHandler<DotEnvReloadedEventArgs>? Reloaded {
+            add {
+            }
+            remove {
+            }
         }
     }
 
