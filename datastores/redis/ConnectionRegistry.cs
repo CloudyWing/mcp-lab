@@ -93,6 +93,15 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             options.Password = cfg.Password;
         }
 
+        if (cfg.UseTls) {
+            options.Ssl = true;
+            options.SslHost = cfg.Host;
+
+            if (cfg.SslSkipVerify) {
+                options.CertificateValidation += (_, _, _, _) => true;
+            }
+        }
+
         return await ConnectionMultiplexer.ConnectAsync(options).ConfigureAwait(false);
     }
 
@@ -126,6 +135,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             Password: values.GetString("PASSWORD"),
             Database: values.GetInt("DATABASE"),
             ConnectTimeoutSeconds: values.GetInt("CONNECT_TIMEOUT"),
-            OperationTimeoutSeconds: values.GetInt("OPERATION_TIMEOUT")
+            OperationTimeoutSeconds: values.GetInt("OPERATION_TIMEOUT"),
+            UseTls: values.GetBool("USE_TLS"),
+            SslSkipVerify: values.GetBool("SSL_SKIP_VERIFY")
         );
 }

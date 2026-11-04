@@ -51,6 +51,23 @@ internal sealed class ConnectionSettingsParserTests {
     }
 
     [Test]
+    public void Parse_MessagingConnections_DefaultToPlainTextWithCertificateValidation() {
+        ConnectionParseResult mqtt = Parse(ConnectionSchemas.Mqtt, new() { ["MQTT_CONN_A_HOST"] = "mqtt" });
+        ConnectionParseResult rabbit = Parse(ConnectionSchemas.RabbitMq, new() {
+            ["RABBITMQ_CONN_A_HOST"] = "rabbit",
+            ["RABBITMQ_CONN_A_USER"] = "u",
+            ["RABBITMQ_CONN_A_PASSWORD"] = "p",
+            ["RABBITMQ_CONN_A_USE_TLS"] = "true",
+        });
+
+        Assert.Multiple(() => {
+            Assert.That(mqtt.Connections.Single().GetBool("USE_TLS"), Is.False);
+            Assert.That(rabbit.Connections.Single().GetBool("USE_TLS"), Is.True);
+            Assert.That(rabbit.Connections.Single().GetBool("SSL_SKIP_VERIFY"), Is.False);
+        });
+    }
+
+    [Test]
     public void Parse_ElasticsearchWithoutCredentials_LoadsWithSslVerification() {
         ConnectionParseResult result = Parse(ConnectionSchemas.Elasticsearch, new() {
             ["ES_CONN_LOCAL_URL"] = "http://es:9200",

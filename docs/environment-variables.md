@@ -173,6 +173,8 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `REDIS_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
 | `REDIS_CONN_PROD_CONNECT_TIMEOUT` | `5` | 建立連線的逾時秒數 |
 | `REDIS_CONN_PROD_OPERATION_TIMEOUT` | `10` | 單一指令的逾時秒數 |
+| `REDIS_CONN_PROD_USE_TLS` | `false` | 使用 TLS 連線 |
+| `REDIS_CONN_PROD_SSL_SKIP_VERIFY` | `false` | 略過 TLS 憑證驗證，僅用於自簽憑證 |
 
 ## OIDC 連線
 
@@ -197,6 +199,8 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `MQTT_CONN_PROD_PORT` | `1883` | 連線埠 |
 | `MQTT_CONN_PROD_USER` | `` | 使用者帳號 |
 | `MQTT_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
+| `MQTT_CONN_PROD_USE_TLS` | `false` | 使用 TLS 連線 |
+| `MQTT_CONN_PROD_SSL_SKIP_VERIFY` | `false` | 略過 TLS 憑證驗證，僅用於自簽憑證 |
 
 ## RabbitMQ 連線
 
@@ -209,6 +213,8 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `RABBITMQ_CONN_PROD_MGMTPORT` | `15672` | 管理介面埠 |
 | `RABBITMQ_CONN_PROD_USER` | `` | 使用者帳號 |
 | `RABBITMQ_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
+| `RABBITMQ_CONN_PROD_USE_TLS` | `false` | 使用 TLS 連線（Management API 改用 HTTPS） |
+| `RABBITMQ_CONN_PROD_SSL_SKIP_VERIFY` | `false` | 略過 TLS 憑證驗證，僅用於自簽憑證 |
 
 ## Mailpit 連線
 

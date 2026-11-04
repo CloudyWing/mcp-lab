@@ -6,5 +6,7 @@ namespace CloudyWing.McpLab.Redis;
 public sealed record ConnectionConfig(
     string Name, string Host, int Port, string Password, int Database,
     int ConnectTimeoutSeconds = 5,
-    int OperationTimeoutSeconds = 10
+    int OperationTimeoutSeconds = 10,
+    bool UseTls = false,
+    bool SslSkipVerify = false
 );

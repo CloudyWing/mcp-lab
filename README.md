@@ -47,10 +47,10 @@ Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="st
 | mcp-sql-server | `MSSQL_CONN` | HOST、USER、PASSWORD | PORT（1433）、DATABASE（master）、TRUST_SERVER_CERTIFICATE（true）、CONNECT_TIMEOUT（30 秒） |
 | mcp-oracle | `ORACLE_CONN` | HOST、SERVICE、USER、PASSWORD | PORT（1521） |
 | mcp-elasticsearch | `ES_CONN` | URL | USER、PASSWORD、SSL_SKIP_VERIFY（false） |
-| mcp-redis | `REDIS_CONN` | HOST | PORT（6379）、PASSWORD、DATABASE（0）、CONNECT_TIMEOUT（5 秒）、OPERATION_TIMEOUT（10 秒） |
+| mcp-redis | `REDIS_CONN` | HOST | PORT（6379）、PASSWORD、DATABASE（0）、CONNECT_TIMEOUT（5 秒）、OPERATION_TIMEOUT（10 秒）、USE_TLS（false）、SSL_SKIP_VERIFY（false） |
 | mcp-oidc | `OIDC_CONN` | ISSUER | DISCOVERY_URL、AUDIENCE、REQUIRE_HTTPS_METADATA（true） |
-| mcp-mosquitto | `MQTT_CONN` | HOST | PORT（1883）、USER、PASSWORD |
-| mcp-rabbitmq | `RABBITMQ_CONN` | HOST、USER、PASSWORD | MGMTPORT（15672） |
+| mcp-mosquitto | `MQTT_CONN` | HOST | PORT（1883）、USER、PASSWORD、USE_TLS（false）、SSL_SKIP_VERIFY（false） |
+| mcp-rabbitmq | `RABBITMQ_CONN` | HOST、USER、PASSWORD | MGMTPORT（15672）、USE_TLS（false，改用 HTTPS）、SSL_SKIP_VERIFY（false） |
 | mcp-mailpit | `MAILPIT_CONN` | URL | — |
 
 每個連線都可設定 `NAME`，未填時使用 Alias 的小寫（例如 `PROD` → `prod`）。也可設定 `ENVIRONMENT`（`local`、`dev`、`test`、`staging`、`prod`），只用來顯示，`list_connections()` 會回傳此標籤，方便 Agent 辨認正式環境。欄位定義集中在 `shared/McpLab.Shared/Configuration/ConnectionSchemas.cs`，解析時會檢查：
@@ -215,6 +215,7 @@ python3 scripts/check-all.py --build-services --smoke --include-oracle
 - 目標服務在同一台 Docker 主機上：使用 `host.docker.internal`
 - 目標服務為遠端機器：填 DNS 名稱或 IP
 - Elasticsearch 使用 HTTPS 自簽憑證：設定 `ES_CONN_{ALIAS}_SSL_SKIP_VERIFY=true`
+- MQTT、Redis 使用 TLS，或 RabbitMQ Management API 使用 HTTPS：設定 `*_CONN_{ALIAS}_USE_TLS=true`，並把 PORT／MGMTPORT 改成 TLS 埠（例如 8883、15671）；自簽憑證再加上 `SSL_SKIP_VERIFY=true`
 
 ## 資料服務工具限制
 

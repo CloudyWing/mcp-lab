@@ -67,6 +67,8 @@ public static class ConnectionSchemas {
         new("DATABASE", ConnectionFieldKind.NonNegativeInt, "資料庫編號", DefaultValue: "0"),
         new("CONNECT_TIMEOUT", ConnectionFieldKind.PositiveInt, "建立連線的逾時秒數", DefaultValue: "5"),
         new("OPERATION_TIMEOUT", ConnectionFieldKind.PositiveInt, "單一指令的逾時秒數", DefaultValue: "10"),
+        new("USE_TLS", ConnectionFieldKind.Bool, "使用 TLS 連線", DefaultValue: "false"),
+        new("SSL_SKIP_VERIFY", ConnectionFieldKind.Bool, "略過 TLS 憑證驗證，僅用於自簽憑證", DefaultValue: "false"),
     ]);
 
     /// <summary>OIDC.</summary>
@@ -87,6 +89,8 @@ public static class ConnectionSchemas {
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "1883"),
         new("USER", ConnectionFieldKind.Text, "帳號，允許匿名時留空"),
         new("PASSWORD", ConnectionFieldKind.Secret, "密碼"),
+        new("USE_TLS", ConnectionFieldKind.Bool, "使用 TLS 連線", DefaultValue: "false"),
+        new("SSL_SKIP_VERIFY", ConnectionFieldKind.Bool, "略過 TLS 憑證驗證，僅用於自簽憑證", DefaultValue: "false"),
     ]);
 
     /// <summary>RabbitMQ.</summary>
@@ -97,6 +101,8 @@ public static class ConnectionSchemas {
         new("MGMTPORT", ConnectionFieldKind.Port, "Management API 連接埠", DefaultValue: "15672", Aliases: ["MGMT_PORT"]),
         new("USER", ConnectionFieldKind.Text, "Management API 帳號", Required: true),
         new("PASSWORD", ConnectionFieldKind.Secret, "Management API 密碼", Required: true),
+        new("USE_TLS", ConnectionFieldKind.Bool, "以 HTTPS 連線 Management API", DefaultValue: "false"),
+        new("SSL_SKIP_VERIFY", ConnectionFieldKind.Bool, "略過 HTTPS 憑證驗證，僅用於自簽憑證", DefaultValue: "false"),
     ]);
 
     /// <summary>Mailpit.</summary>

@@ -54,6 +54,16 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
         if (!string.IsNullOrEmpty(cfg.User)) {
             optBuilder = optBuilder.WithCredentials(cfg.User, cfg.Password);
         }
+
+        if (cfg.UseTls) {
+            optBuilder = optBuilder.WithTlsOptions(tls => {
+                tls.UseTls();
+
+                if (cfg.SslSkipVerify) {
+                    tls.WithCertificateValidationHandler(_ => true);
+                }
+            });
+        }
         await client.ConnectAsync(optBuilder.Build(), CancellationToken.None);
         return client;
     }
@@ -67,6 +77,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             Host: values.GetString("HOST"),
             Port: values.GetInt("PORT"),
             User: values.GetString("USER"),
-            Password: values.GetString("PASSWORD")
+            Password: values.GetString("PASSWORD"),
+            UseTls: values.GetBool("USE_TLS"),
+            SslSkipVerify: values.GetBool("SSL_SKIP_VERIFY")
         );
 }

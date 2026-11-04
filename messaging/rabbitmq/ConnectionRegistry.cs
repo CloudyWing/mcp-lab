@@ -12,6 +12,11 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// </summary>
     public const string ClientKey = "rabbitmq";
 
+    /// <summary>
+    /// The HTTP client name used when certificate validation is skipped.
+    /// </summary>
+    public const string SslSkipClientKey = "rabbitmq-ssl-skip";
+
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ConnectionRegistryCore<ConnectionConfig> core;
     private readonly IDotEnvSnapshotProvider snapshotProvider;
@@ -59,9 +64,9 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// </summary>
     public HttpClient CreateClient(string? connectionName) {
         ConnectionConfig cfg = Get(connectionName);
-        HttpClient http = httpClientFactory.CreateClient(ClientKey);
+        HttpClient http = httpClientFactory.CreateClient(cfg.UseTls && cfg.SslSkipVerify ? SslSkipClientKey : ClientKey);
         http.Timeout = ServiceSettings.RabbitMq.HttpTimeout.ReadSeconds(snapshotProvider.Current);
-        http.BaseAddress = new Uri($"http://{cfg.Host}:{cfg.MgmtPort}/");
+        http.BaseAddress = new Uri($"{(cfg.UseTls ? "https" : "http")}://{cfg.Host}:{cfg.MgmtPort}/");
 
         string creds = Convert.ToBase64String(
             Encoding.UTF8.GetBytes($"{cfg.User}:{cfg.Password}"));
@@ -81,6 +86,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             Host: values.GetString("HOST"),
             MgmtPort: values.GetInt("MGMTPORT"),
             User: values.GetString("USER"),
-            Password: values.GetString("PASSWORD")
+            Password: values.GetString("PASSWORD"),
+            UseTls: values.GetBool("USE_TLS"),
+            SslSkipVerify: values.GetBool("SSL_SKIP_VERIFY")
         );
 }

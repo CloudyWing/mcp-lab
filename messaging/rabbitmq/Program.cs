@@ -9,6 +9,11 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 builder.Services.AddDotEnvSnapshot(dotEnvPath);
 builder.Services.AddSingleton<ConnectionRegistry>();
 builder.Services.AddHttpClient(ConnectionRegistry.ClientKey);
+builder.Services.AddHttpClient(ConnectionRegistry.SslSkipClientKey)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {
+        ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+    });
 builder.Services
     .AddMcpServer(
         o => o.ServerInfo = new() {
