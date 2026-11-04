@@ -147,7 +147,7 @@ MCP client 設定範例（HTTP transport）：
 
 各 MCP 服務會把 `config/<服務>` 目錄以唯讀方式掛載到容器內 `/app/config`，並由服務進程監聽 `/app/config/service.env`。修改後不需要重啟容器；下一次呼叫 `list_connections()`、`list_runtime_limits()` 或實際查詢工具時會讀取新的 runtime 設定。新增、修改與刪除連線都會生效。
 
-熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定位於根目錄 `.env`，不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_GID`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
+熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定位於根目錄 `.env`，不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
 
 `service.env` 變更後通常會在 1 秒內生效。若語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
 
@@ -369,14 +369,12 @@ MAILPIT_CONN_DEFAULT_URL=http://host.docker.internal:8025
 
 `mcp-docker` 透過 Docker Engine API 讀取本機 Docker 狀態，工具只呼叫 read-only API，不提供 restart、exec、
 remove、prune 等會改變狀態的操作。此服務仍套用 `read_only`、`cap_drop: [ALL]`、`no-new-privileges` 與非 root
-使用者。Docker Desktop 可能把 socket 掛成容器內 `root:root 660`，Compose 會讓容器使用者加入 root group 與
-`DOCKER_GID`，以相容 Docker Desktop 與 native Linux Docker。
+使用者。
 
-查詢 Docker socket group id：
-
-```bash
-stat -c "%g" /var/run/docker.sock
-```
+`mcp-docker` 不直接掛載 Docker socket，而是透過同一個 profile 中的 `mcp-docker-proxy`
+（[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)）存取。Proxy 只開放 ping、version 與 containers
+的 GET 請求，拒絕所有會改變狀態的請求，並且只放在 internal network，其他服務連不到。即使 `mcp-docker` 被入侵，
+也無法透過 Docker API 建立或執行容器。
 
 ### 可用工具
 

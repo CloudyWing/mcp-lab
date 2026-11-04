@@ -14,7 +14,7 @@
 | `*_MAX_CELL_CHARS` | runtime | SQL Server 與 Oracle 單一欄位回傳字元上限 |
 | `*_HTTP_TIMEOUT`、`API_CONTRACT_*_BODY_BYTES` | runtime | HTTP 逾時與 API Contract 回應大小上限 |
 | `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`MCP_ADMIN_BIND_ADDRESS`、`MCPLAB_ADMIN_PASSWORD`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
-| `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
+| `DOCKER_SOCKET_PATH`、`DOCKER_PROXY_TAG` | build-time | Docker socket 路徑與 socket proxy 映像標籤 |
 | `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
 
 runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/app/config/service.env` 後套用，範本為 `config/services.env.example`。build-time 變數放在根目錄 `.env`，由 Docker Compose 或測試腳本在啟動時讀取，範本為 `.env.example`。
@@ -63,8 +63,8 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 
 | 變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `DOCKER_GID` | `1001` | native Linux Docker socket 的 group id；Docker Desktop 另會使用 root group 存取 socket |
-| `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 容器內 Docker socket 路徑 |
+| `DOCKER_PROXY_TAG` | `v0.4.1` | `mcp-docker-proxy`（ghcr.io/tecnativa/docker-socket-proxy）的映像標籤 |
+| `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 主機上的 Docker socket 路徑，只掛載到 `mcp-docker-proxy` |
 | `MCPLAB_RUNTIME_UID` | `1000` | MCP 服務容器的非 root 使用者 UID，需能讀取掛載的 `service.env` |
 | `MCPLAB_RUNTIME_GID` | `1000` | MCP 服務容器的非 root 使用者 GID，需能讀取掛載的 `service.env` |
 

@@ -13,15 +13,11 @@ services:
       service: default-policy
     environment:
       MCPLAB_DOTENV_PATH: /app/config/service.env
-      DOCKER_SOCKET_PATH: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-    group_add:
-      - "0"
-      - "${DOCKER_GID:-1001}"
+      DOCKER_HOST: tcp://mcp-docker-proxy:2375
+    depends_on:
+      - mcp-docker-proxy
     volumes:
       - ../../config/mcp-docker:/app/config:ro
-      - type: bind
-        source: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-        target: /var/run/docker.sock
     ports:
       - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_DOCKER_PORT:-9860}:8080"
     healthcheck:
@@ -34,3 +30,41 @@ services:
     cpus: 0.5
     networks:
       - shared_net
+      - docker_proxy_net
+
+  # Only this proxy touches the Docker socket. It allows GET requests to ping, version, and containers,
+  # and rejects every request that changes state (POST, DELETE, exec, and so on).
+  mcp-docker-proxy:
+    container_name: mcp-docker-proxy
+    profiles:
+      - docker
+    image: ghcr.io/tecnativa/docker-socket-proxy:${DOCKER_PROXY_TAG:-v0.4.1}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run:rw,nosuid,nodev,size=8m
+      - /tmp:rw,nosuid,nodev,size=8m
+    environment:
+      PING: 1
+      VERSION: 1
+      CONTAINERS: 1
+      EVENTS: 0
+      INFO: 0
+      POST: 0
+      # The proxy is reached over the internal IPv4 network only; some hosts have no IPv6 support.
+      DISABLE_IPV6: 1
+    volumes:
+      - type: bind
+        source: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+    mem_limit: 64m
+    cpus: 0.25
+    networks:
+      - docker_proxy_net
+
+networks:
+  docker_proxy_net:
+    internal: true

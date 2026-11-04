@@ -766,6 +766,20 @@ def check_docker_mcp(status_by_service: dict[str, dict[str, Any]], timeout_secon
 
     expect_tool_ok(client.call_tool("get_container_stats", {"container": "mcp-docker"}))
 
+    inspected = json.loads(run_command(["docker", "inspect", "mcp-docker"]).stdout)[0]
+    if any(str(mount.get("Destination", "")).endswith("docker.sock") for mount in inspected.get("Mounts") or []):
+        raise SmokeError("mcp-docker mounts the Docker socket directly; it should use mcp-docker-proxy.")
+
+    # The proxy must refuse requests that change state, even from the container allowed to reach it.
+    request = (
+        "exec 3<>/dev/tcp/mcp-docker-proxy/2375 && "
+        "printf 'POST /containers/create HTTP/1.1\\r\\nHost: proxy\\r\\nContent-Type: application/json\\r\\n"
+        "Content-Length: 2\\r\\nConnection: close\\r\\n\\r\\n{}' >&3 && head -n 1 <&3"
+    )
+    status_line = run_command(["docker", "exec", "mcp-docker", "bash", "-c", request]).stdout.strip()
+    if " 403 " not in f"{status_line} ":
+        raise SmokeError(f"mcp-docker-proxy did not reject POST /containers/create: {status_line}")
+
 
 def check_mailpit_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
     subject = f"mcp-lab smoke {uuid.uuid4()}"

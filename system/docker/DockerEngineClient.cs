@@ -8,7 +8,8 @@ public sealed class DockerEngineClient {
     private readonly HttpClient http;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="DockerEngineClient"/> using the configured Docker socket.
+    /// Initializes a new instance of <see cref="DockerEngineClient"/> using <c>DOCKER_HOST</c> (for example
+    /// <c>tcp://mcp-docker-proxy:2375</c>) when set, otherwise the Docker socket at <c>DOCKER_SOCKET_PATH</c>.
     /// </summary>
     public DockerEngineClient() : this(CreateHttpClient()) {
     }
@@ -62,7 +63,28 @@ public sealed class DockerEngineClient {
             ?? throw new InvalidOperationException("Docker Engine returned an invalid JSON array.");
     }
 
+    /// <summary>
+    /// Converts a <c>DOCKER_HOST</c> value to an HTTP base address, or returns <see langword="null"/> when it is
+    /// empty or a unix socket.
+    /// </summary>
+    public static Uri? ParseDockerHost(string? dockerHost) {
+        if (string.IsNullOrWhiteSpace(dockerHost) || dockerHost.StartsWith("unix://", StringComparison.OrdinalIgnoreCase)) {
+            return null;
+        }
+
+        string value = dockerHost.Trim();
+        value = value.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) ? "http://" + value[6..] : value;
+
+        return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https"
+            ? uri
+            : throw new InvalidOperationException($"DOCKER_HOST must be tcp://host:port, http://host:port, or unix://path (got '{dockerHost}').");
+    }
+
     private static HttpClient CreateHttpClient() {
+        if (ParseDockerHost(Environment.GetEnvironmentVariable("DOCKER_HOST")) is Uri baseAddress) {
+            return new HttpClient { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(30) };
+        }
+
         string socketPath = Environment.GetEnvironmentVariable("DOCKER_SOCKET_PATH") ?? DefaultSocketPath;
         SocketsHttpHandler handler = new() {
             ConnectCallback = async (_, cancellationToken) => {
