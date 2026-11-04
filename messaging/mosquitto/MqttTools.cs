@@ -22,6 +22,7 @@ public sealed class MqttTools {
         ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
+                environment = registry.EnvironmentOf(kv.Key),
                 host = kv.Value.Host,
                 port = kv.Value.Port,
                 user = kv.Value.User,

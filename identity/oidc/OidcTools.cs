@@ -146,7 +146,7 @@ public sealed class OidcTools {
         }
     }
 
-    private static string ValidateToken(
+    private string ValidateToken(
         string token,
         ConnectionConfig cfg,
         OpenIdConnectConfiguration discovery,
@@ -212,8 +212,9 @@ public sealed class OidcTools {
             .ToArray();
     }
 
-    private static object ToConnectionSummary(ConnectionConfig cfg) =>
+    private object ToConnectionSummary(ConnectionConfig cfg) =>
         new {
+            environment = registry.EnvironmentOf(cfg.Name),
             name = cfg.Name,
             issuer = cfg.Issuer,
             discovery_url = cfg.DiscoveryUrl,

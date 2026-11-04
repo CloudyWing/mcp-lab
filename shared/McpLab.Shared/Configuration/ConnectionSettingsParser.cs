@@ -151,6 +151,14 @@ public static partial class ConnectionSettingsParser {
 
                 if (ValidateValue(field.Kind, value) is string error) {
                     errors.Add($"{variable} {error}");
+                } else if (field.Choices is { } choices) {
+                    string? match = choices.FirstOrDefault(choice => string.Equals(choice, value, StringComparison.OrdinalIgnoreCase));
+
+                    if (match is null) {
+                        errors.Add($"{variable} must be one of: {string.Join(", ", choices)}.");
+                    } else {
+                        value = match;
+                    }
                 }
 
                 values[field.Name] = value;

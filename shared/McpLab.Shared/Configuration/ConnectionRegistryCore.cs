@@ -44,6 +44,8 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
     private IReadOnlyDictionary<string, TConfig> current =
         new Dictionary<string, TConfig>(StringComparer.OrdinalIgnoreCase);
     private ConnectionRegistryStatus status;
+    private IReadOnlyDictionary<string, string> environments =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance and loads the current snapshot.
@@ -82,6 +84,11 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
     public ConnectionRegistryStatus Status => Volatile.Read(ref status);
 
     /// <summary>
+    /// Gets the ENVIRONMENT label of a loaded connection, or an empty string when it has none.
+    /// </summary>
+    public string EnvironmentOf(string name) => Volatile.Read(ref environments).GetValueOrDefault(name) ?? "";
+
+    /// <summary>
     /// Returns the named connection, or the first one when <paramref name="name"/> is empty.
     /// </summary>
     public TConfig Get(string? name) {
@@ -112,6 +119,8 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
 
     private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
         IReadOnlyDictionary<string, TConfig> previous = All;
+        IReadOnlyDictionary<string, string> previousEnvironments = Volatile.Read(ref environments);
+        Dictionary<string, string> nextEnvironments = new(StringComparer.OrdinalIgnoreCase);
         ConnectionParseResult parsed = ConnectionSettingsParser.Parse(schema, snapshot);
         Dictionary<string, TConfig> result = new(StringComparer.OrdinalIgnoreCase);
         List<ConnectionStatus> statuses = [];
@@ -120,6 +129,7 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
         foreach (ConnectionValues values in parsed.Connections) {
             try {
                 result[values.Name] = build(values);
+                nextEnvironments[values.Name] = values.GetString(ConnectionSchema.EnvironmentField);
                 statuses.Add(new ConnectionStatus(values.Alias, values.Name, "loaded", []));
             } catch (InvalidOperationException ex) {
                 rejected.Add(new RejectedConnection(values.Alias, values.Name, [ex.Message]));
@@ -129,6 +139,10 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
         foreach (RejectedConnection item in rejected) {
             bool retained = !result.ContainsKey(item.Name) && previous.TryGetValue(item.Name, out TConfig? previousConfig)
                 && result.TryAdd(item.Name, previousConfig);
+            if (retained && previousEnvironments.TryGetValue(item.Name, out string? previousEnvironment)) {
+                nextEnvironments[item.Name] = previousEnvironment;
+            }
+
             statuses.Add(new ConnectionStatus(
                 item.Alias,
                 item.Name,
@@ -143,6 +157,7 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
         }
 
         Volatile.Write(ref current, result);
+        Volatile.Write(ref environments, nextEnvironments);
         Volatile.Write(ref status, new ConnectionRegistryStatus(schema, DateTimeOffset.UtcNow, statuses, parsed.Ignored));
         Rebuilt?.Invoke(result);
     }

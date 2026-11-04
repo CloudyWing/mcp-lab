@@ -1,0 +1,69 @@
+@page "/history"
+@attribute [Authorize]
+@inject AuditLog Audit
+
+<PageTitle>異動紀錄 - MCP Lab</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <div class="page-heading">
+        <MudText Typo="Typo.h4">異動紀錄</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">透過此介面做的設定變更，最新的在最上面。紀錄不含任何設定值；要還原設定檔，請到該服務頁的「版本紀錄」。</MudText>
+    </div>
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudSelect T="string" Label="服務" Value="serviceFilter" ValueChanged="FilterChanged" Class="history-filter">
+            <MudSelectItem T="string" Value="@("")">全部服務</MudSelectItem>
+            @foreach (ManagedService service in ServiceCatalog.All) {
+                <MudSelectItem T="string" Value="@service.Name">@service.DisplayName</MudSelectItem>
+            }
+        </MudSelect>
+        @if (entries.Count == 0) {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無紀錄。</MudText>
+        } else {
+            <div class="table-scroll">
+                <MudSimpleTable Dense="true" Elevation="0">
+                    <thead><tr><th>時間</th><th>服務</th><th>變更</th><th>結果</th></tr></thead>
+                    <tbody>
+                        @foreach (AuditEntry entry in entries) {
+                            <tr>
+                                <td class="time-col">@entry.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)</td>
+                                <td><MudLink Href="@($"/services/{entry.Service}")">@(ServiceCatalog.Find(entry.Service)?.DisplayName ?? entry.Service)</MudLink></td>
+                                <td>@entry.Action</td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@OutcomeColor(entry.Outcome)">@OutcomeText(entry.Outcome)</MudChip>
+                                    <div class="issue-text">@entry.Message</div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        }
+    </MudPaper>
+</MudStack>
+
+@code {
+    private string serviceFilter = "";
+    private List<AuditEntry> entries = [];
+
+    protected override void OnInitialized() => Load();
+
+    private void FilterChanged(string value) {
+        serviceFilter = value;
+        Load();
+    }
+
+    private void Load() {
+        entries = [.. Audit.ReadLatest(200, serviceFilter.Length == 0 ? null : serviceFilter)];
+    }
+
+    private static string OutcomeText(ApplyOutcome outcome) => outcome switch {
+        ApplyOutcome.Applied => "已生效",
+        ApplyOutcome.RolledBack => "已自動還原",
+        _ => "未確認",
+    };
+
+    private static Color OutcomeColor(ApplyOutcome outcome) => outcome switch {
+        ApplyOutcome.Applied => Color.Success,
+        ApplyOutcome.RolledBack => Color.Error,
+        _ => Color.Warning,
+    };
+}

@@ -26,7 +26,7 @@ public sealed class MailpitTools {
     /// </summary>
     [McpServerTool, Description("列出所有已設定的 Mailpit 連線")]
     public string ListConnections() =>
-        ToolResponse.Ok(registry.All.Select(kv => new { name = kv.Key, url = kv.Value.Url }));
+        ToolResponse.Ok(registry.All.Select(kv => new { name = kv.Key, environment = registry.EnvironmentOf(kv.Key), url = kv.Value.Url }));
 
     /// <summary>
     /// Tests whether the Mailpit API is reachable and returns basic message counts.

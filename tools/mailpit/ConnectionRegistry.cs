@@ -50,6 +50,11 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
+    /// Gets the ENVIRONMENT label of a connection, or an empty string.
+    /// </summary>
+    public string EnvironmentOf(string name) => core.EnvironmentOf(name);
+
+    /// <summary>
     /// Creates and configures an <see cref="HttpClient"/> for the specified named Mailpit connection.
     /// </summary>
     public HttpClient CreateClient(string? connectionName) {

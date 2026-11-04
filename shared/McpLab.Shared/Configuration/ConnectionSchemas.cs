@@ -5,15 +5,28 @@ namespace CloudyWing.McpLab.Shared.Configuration;
 /// validation, status reporting, and editing tools.
 /// </summary>
 public static class ConnectionSchemas {
+    /// <summary>
+    /// Allowed values of the ENVIRONMENT field.
+    /// </summary>
+    public static readonly IReadOnlyList<string> EnvironmentChoices = ["local", "dev", "test", "staging", "prod"];
+
     private static readonly ConnectionField Name = new(
         ConnectionSchema.NameField,
         ConnectionFieldKind.Text,
         "工具使用的連線名稱，未填時使用 Alias 的小寫"
     );
 
+    private static readonly ConnectionField Environment = new(
+        ConnectionSchema.EnvironmentField,
+        ConnectionFieldKind.Text,
+        "環境標籤，只用來顯示與協助 Agent 判斷，不影響行為",
+        Choices: EnvironmentChoices
+    );
+
     /// <summary>SQL Server.</summary>
     public static readonly ConnectionSchema SqlServer = new("mcp-sql-server", "MSSQL_CONN", [
         Name,
+        Environment,
         new("HOST", ConnectionFieldKind.Text, "主機名稱或 IP", Required: true),
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "1433"),
         new("USER", ConnectionFieldKind.Text, "SQL 驗證帳號", Required: true),
@@ -26,6 +39,7 @@ public static class ConnectionSchemas {
     /// <summary>Oracle.</summary>
     public static readonly ConnectionSchema Oracle = new("mcp-oracle", "ORACLE_CONN", [
         Name,
+        Environment,
         new("HOST", ConnectionFieldKind.Text, "主機名稱或 IP", Required: true),
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "1521"),
         new("SERVICE", ConnectionFieldKind.Text, "Service name", Required: true),
@@ -36,6 +50,7 @@ public static class ConnectionSchemas {
     /// <summary>Elasticsearch.</summary>
     public static readonly ConnectionSchema Elasticsearch = new("mcp-elasticsearch", "ES_CONN", [
         Name,
+        Environment,
         new("URL", ConnectionFieldKind.Url, "叢集 URL，例如 http://host:9200", Required: true),
         new("USER", ConnectionFieldKind.Text, "Basic auth 帳號，未啟用驗證時留空"),
         new("PASSWORD", ConnectionFieldKind.Secret, "Basic auth 密碼"),
@@ -45,6 +60,7 @@ public static class ConnectionSchemas {
     /// <summary>Redis.</summary>
     public static readonly ConnectionSchema Redis = new("mcp-redis", "REDIS_CONN", [
         Name,
+        Environment,
         new("HOST", ConnectionFieldKind.Text, "主機名稱或 IP", Required: true),
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "6379"),
         new("PASSWORD", ConnectionFieldKind.Secret, "密碼，未設定 requirepass 時留空"),
@@ -56,6 +72,7 @@ public static class ConnectionSchemas {
     /// <summary>OIDC.</summary>
     public static readonly ConnectionSchema Oidc = new("mcp-oidc", "OIDC_CONN", [
         Name,
+        Environment,
         new("ISSUER", ConnectionFieldKind.Url, "Issuer URL", Required: true),
         new("DISCOVERY_URL", ConnectionFieldKind.Url, "Discovery document URL，未填時使用 issuer 的 .well-known", Aliases: ["METADATA_URL"]),
         new("AUDIENCE", ConnectionFieldKind.Text, "驗證 JWT 時預期的 audience"),
@@ -65,6 +82,7 @@ public static class ConnectionSchemas {
     /// <summary>MQTT (Mosquitto).</summary>
     public static readonly ConnectionSchema Mqtt = new("mcp-mosquitto", "MQTT_CONN", [
         Name,
+        Environment,
         new("HOST", ConnectionFieldKind.Text, "主機名稱或 IP", Required: true),
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "1883"),
         new("USER", ConnectionFieldKind.Text, "帳號，允許匿名時留空"),
@@ -74,6 +92,7 @@ public static class ConnectionSchemas {
     /// <summary>RabbitMQ.</summary>
     public static readonly ConnectionSchema RabbitMq = new("mcp-rabbitmq", "RABBITMQ_CONN", [
         Name,
+        Environment,
         new("HOST", ConnectionFieldKind.Text, "主機名稱或 IP", Required: true),
         new("MGMTPORT", ConnectionFieldKind.Port, "Management API 連接埠", DefaultValue: "15672", Aliases: ["MGMT_PORT"]),
         new("USER", ConnectionFieldKind.Text, "Management API 帳號", Required: true),
@@ -83,6 +102,7 @@ public static class ConnectionSchemas {
     /// <summary>Mailpit.</summary>
     public static readonly ConnectionSchema Mailpit = new("mcp-mailpit", "MAILPIT_CONN", [
         Name,
+        Environment,
         new("URL", ConnectionFieldKind.Url, "Mailpit URL，例如 http://host:8025", Required: true),
     ]);
 
@@ -92,6 +112,7 @@ public static class ConnectionSchemas {
         "API_CONTRACT_CONN",
         [
             Name,
+        Environment,
             new("SPEC_URL", ConnectionFieldKind.Url, "OpenAPI spec URL"),
             new("SPEC_PATH", ConnectionFieldKind.Text, "容器內的 OpenAPI spec 路徑"),
             new("BASE_URL", ConnectionFieldKind.Url, "API base URL，未填時使用 spec 的第一個 server"),

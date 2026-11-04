@@ -35,6 +35,15 @@
                                 <MudSelectItem T="string" Value="@("false")">false</MudSelectItem>
                             </MudSelect>
                             break;
+                        case ConnectionFieldKind.Text when current.Choices is not null:
+                            <MudSelect T="string" Label="@label" Value="@Draft.Values.GetValueOrDefault(current.Name, "")"
+                                       ValueChanged="@(value => Draft.Values[current.Name] = value)" HelperText="@helpText">
+                                <MudSelectItem T="string" Value="@("")">未設定</MudSelectItem>
+                                @foreach (string choice in current.Choices) {
+                                    <MudSelectItem T="string" Value="@choice">@choice</MudSelectItem>
+                                }
+                            </MudSelect>
+                            break;
                         default:
                             <MudTextField T="string" Label="@label" Immediate="true"
                                           Value="@Draft.Values.GetValueOrDefault(current.Name, "")"

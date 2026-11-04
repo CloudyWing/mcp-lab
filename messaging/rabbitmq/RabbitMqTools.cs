@@ -22,6 +22,7 @@ public sealed class RabbitMqTools {
         return ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
+                environment = registry.EnvironmentOf(kv.Key),
                 host = kv.Value.Host,
                 mgmt_port = kv.Value.MgmtPort,
                 user = kv.Value.User,

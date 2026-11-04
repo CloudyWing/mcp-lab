@@ -268,8 +268,9 @@ public sealed class ApiContractTools {
         }
     }
 
-    private static object ToConnectionSummary(ConnectionConfig cfg) =>
+    private object ToConnectionSummary(ConnectionConfig cfg) =>
         new {
+            environment = registry.EnvironmentOf(cfg.Name),
             name = cfg.Name,
             spec_source = string.IsNullOrWhiteSpace(cfg.SpecUrl) ? "path" : "url",
             spec_url = cfg.SpecUrl,

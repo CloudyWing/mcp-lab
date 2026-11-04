@@ -38,6 +38,7 @@ public sealed class OracleTools {
             registry.All.Select(
                 kv => new {
                     name = kv.Key,
+                environment = registry.EnvironmentOf(kv.Key),
                     host = kv.Value.Host,
                     port = kv.Value.Port,
                     service = kv.Value.Service,

@@ -55,6 +55,11 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
+    /// Gets the ENVIRONMENT label of a connection, or an empty string.
+    /// </summary>
+    public string EnvironmentOf(string name) => core.EnvironmentOf(name);
+
+    /// <summary>
     /// Creates an <see cref="HttpClient"/> for the specified profile.
     /// </summary>
     public HttpClient CreateClient(ConnectionConfig cfg) {

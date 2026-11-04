@@ -147,7 +147,7 @@
                 }
 
                 ConfigEditor.SetSetting(file, McpAccessToken.VariableName, [], token);
-                results.Add((service.Name, await Applier.SaveAsync(service.Name, file.ToString())));
+                results.Add((service.Name, await Applier.SaveAsync(service.Name, file.ToString(), token is null ? "停用存取權杖" : "更換存取權杖")));
             }
 
             bool ok = results.All(item => item.Result.Outcome != ApplyOutcome.RolledBack);

@@ -186,3 +186,32 @@ code {
 .login-submit {
   min-height: 44px;
 }
+
+.env-chip {
+  margin-inline-start: 0.5rem;
+}
+
+.time-col {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-line {
+  overflow-wrap: anywhere;
+}
+
+.diff-added code {
+  color: var(--mud-palette-success);
+}
+
+.diff-removed code {
+  color: var(--mud-palette-error);
+}
+
+.audit-line {
+  overflow-wrap: anywhere;
+}
+
+.history-filter {
+  max-width: 320px;
+}

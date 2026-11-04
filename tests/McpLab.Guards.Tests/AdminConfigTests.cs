@@ -242,4 +242,49 @@ internal sealed class AdminConfigTests {
 
         Assert.That((result.Success, result.Message), Is.EqualTo((success, message)));
     }
+
+    [Test]
+    public void ConfigDiff_Compare_HidesSecretValues() {
+        IReadOnlyList<ConfigChange> changes = ConfigDiff.Compare(
+            "REDIS_CONN_A_HOST=old\nREDIS_CONN_A_PASSWORD=one\nREDIS_MAX_ROWS=10\n",
+            "REDIS_CONN_A_HOST=new\nREDIS_CONN_A_PASSWORD=two\nREDIS_CONN_B_HOST=b\n"
+        );
+
+        Assert.That(changes, Is.EqualTo(new[] {
+            new ConfigChange("REDIS_CONN_A_HOST", "changed", "old", "new", false),
+            new ConfigChange("REDIS_CONN_A_PASSWORD", "changed", null, null, true),
+            new ConfigChange("REDIS_CONN_B_HOST", "added", null, "b", false),
+            new ConfigChange("REDIS_MAX_ROWS", "removed", "10", null, false),
+        }));
+    }
+
+    [Test]
+    public async Task AuditLog_ReadLatest_ReturnsNewestFirstAndFilters() {
+        AuditLog log = new(new ConfigStore(root));
+        await log.AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "mcp-redis", "新增連線 A", ApplyOutcome.Applied, "ok"));
+        await log.AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, "mcp-sql-server", "修改服務設定", ApplyOutcome.RolledBack, "rolled back"));
+        await File.AppendAllTextAsync(Path.Combine(root, ".admin", "audit.jsonl"), "not json\n");
+
+        Assert.Multiple(() => {
+            Assert.That(log.ReadLatest(10).Select(entry => entry.Action), Is.EqualTo(new[] { "修改服務設定", "新增連線 A" }));
+            Assert.That(log.ReadLatest(10, "mcp-redis").Single().Outcome, Is.EqualTo(ApplyOutcome.Applied));
+        });
+    }
+
+    [Test]
+    public void ConnectionSettingsParser_EnvironmentChoice_NormalizesCaseAndRejectsUnknownValue() {
+        ConnectionParseResult ok = ConnectionSettingsParser.Parse(ConnectionSchemas.Mailpit, new Dictionary<string, string> {
+            ["MAILPIT_CONN_A_URL"] = "http://a",
+            ["MAILPIT_CONN_A_ENVIRONMENT"] = "PROD",
+        });
+        ConnectionParseResult bad = ConnectionSettingsParser.Parse(ConnectionSchemas.Mailpit, new Dictionary<string, string> {
+            ["MAILPIT_CONN_A_URL"] = "http://a",
+            ["MAILPIT_CONN_A_ENVIRONMENT"] = "production",
+        });
+
+        Assert.Multiple(() => {
+            Assert.That(ok.Connections.Single().GetString("ENVIRONMENT"), Is.EqualTo("prod"));
+            Assert.That(bad.Rejected.Single().Errors.Single(), Does.Contain("must be one of: local, dev, test, staging, prod"));
+        });
+    }
 }

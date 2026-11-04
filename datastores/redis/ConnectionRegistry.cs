@@ -40,6 +40,11 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
+    /// Gets the ENVIRONMENT label of a connection, or an empty string.
+    /// </summary>
+    public string EnvironmentOf(string name) => core.EnvironmentOf(name);
+
+    /// <summary>
     /// Returns the shared <see cref="IConnectionMultiplexer"/> for the specified named connection.
     /// Callers must not dispose it; the registry replaces it when the connection settings change.
     /// </summary>

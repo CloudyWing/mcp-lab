@@ -5,6 +5,7 @@
 @inject ConfigApplier Applier
 @inject ConnectionTester Tester
 @inject ISnackbar Snackbar
+@inject AuditLog Audit
 
 <PageTitle>@(service?.DisplayName ?? Name) - MCP Lab</PageTitle>
 @if (service is null) {
@@ -73,7 +74,12 @@
                                     ConnectionLoadStatus? live = LiveStatus(current.Alias);
                                     <tr>
                                         <td><code>@current.Alias</code></td>
-                                        <td>@current.Name</td>
+                                        <td>
+                                            @current.Name
+                                            @if (current.Values.GetValueOrDefault(ConnectionSchema.EnvironmentField) is { Length: > 0 } environment) {
+                                                <MudChip T="string" Size="Size.Small" Color="@(environment == "prod" ? Color.Error : Color.Default)" Class="env-chip">@environment</MudChip>
+                                            }
+                                        </td>
                                         <td class="target-col">@Target(current)</td>
                                         <td>
                                             <StateChip State="@(live?.State ?? current.State)" />
@@ -129,6 +135,51 @@
             </MudPaper>
         }
 
+        <MudPaper Elevation="0" Outlined="true" Class="content-card">
+            <MudText Typo="Typo.h6">版本紀錄</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">每次儲存前的設定檔都會備份，保留最近 20 版。還原時也會先備份目前的版本。</MudText>
+            @if (revisions.Count == 0) {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無備份。</MudText>
+            } else {
+                <div class="table-scroll">
+                    <MudSimpleTable Dense="true" Elevation="0">
+                        <thead><tr><th>備份時間</th><th>與目前版本的差異</th><th class="actions-col">操作</th></tr></thead>
+                        <tbody>
+                            @foreach (ConfigRevision revision in revisions) {
+                                ConfigRevision current = revision;
+                                IReadOnlyList<ConfigChange> changes = ConfigDiff.Compare(Store.ReadRevision(service.Name, current.Id), Store.Read(service.Name));
+                                <tr>
+                                    <td class="time-col">@FormatTime(current.SavedAt)</td>
+                                    <td>
+                                        @if (changes.Count == 0) {
+                                            <span class="mud-text-secondary">與目前相同</span>
+                                        } else if (expandedRevision == current.Id) {
+                                            @foreach (ConfigChange change in changes) {
+                                                <div class="diff-line diff-@change.Change"><code>@change.Key</code>：@DescribeChange(change)</div>
+                                            }
+                                        } else {
+                                            <MudLink OnClick="() => expandedRevision = current.Id">@changes.Count 個變數不同，顯示</MudLink>
+                                        }
+                                    </td>
+                                    <td class="actions-col">
+                                        <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="busy || changes.Count == 0" OnClick="() => restoring = current">還原此版本</MudButton>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            }
+            @if (history.Count > 0) {
+                <MudText Typo="Typo.subtitle2">最近的變更</MudText>
+                @foreach (AuditEntry entry in history) {
+                    <MudText Typo="Typo.body2" Class="audit-line">
+                        <span class="time-col">@FormatTime(entry.Time)</span>　@entry.Action　<span class="mud-text-secondary">@OutcomeText(entry.Outcome)</span>
+                    </MudText>
+                }
+            }
+        </MudPaper>
+
         @if (service.Schema is null && settings.Count == 0) {
             <MudPaper Elevation="0" Outlined="true" Class="content-card">
                 <MudText Typo="Typo.body2">此服務沒有可在這裡管理的設定。存取權杖請到「存取權杖」頁面設定。</MudText>
@@ -138,6 +189,22 @@
 
     <ConnectionEditor @bind-Visible="editorOpen" Title="@editorTitle" Schema="service.Schema" Draft="draft" SecretsSet="draftSecrets"
                       Errors="editorErrors" Busy="busy" OnSave="SaveConnectionAsync" />
+
+    <MudDialog Visible="@(restoring is not null)" VisibleChanged="@(visible => { if (!visible) restoring = null; })" Options="ConfirmOptions" ActionsClass="dialog-actions">
+        <DialogContent>
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">確認還原設定檔</MudText>
+                @if (restoring is ConfigRevision target) {
+                    <MudText Typo="Typo.body1">還原到 @FormatTime(target.SavedAt) 的備份？</MudText>
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">目前的設定檔會先備份，之後仍可再還原回來。</MudAlert>
+                }
+            </MudStack>
+        </DialogContent>
+        <DialogActions>
+            <MudButton Variant="Variant.Text" Disabled="busy" OnClick="() => restoring = null">取消</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Text" Disabled="busy" OnClick="RestoreAsync">@(busy ? "正在還原…" : "確認還原")</MudButton>
+        </DialogActions>
+    </MudDialog>
 
     <MudDialog Visible="@(deleting is not null)" VisibleChanged="@(visible => { if (!visible) deleting = null; })" Options="ConfirmOptions" ActionsClass="dialog-actions">
         <DialogContent>
@@ -185,6 +252,10 @@
     private IReadOnlySet<string> draftSecrets = new HashSet<string>();
     private IReadOnlyList<string> editorErrors = [];
     private ConnectionEntry? deleting;
+    private List<ConfigRevision> revisions = [];
+    private List<AuditEntry> history = [];
+    private string? expandedRevision;
+    private ConfigRevision? restoring;
 
     protected override async Task OnParametersSetAsync() {
         service = ServiceCatalog.Find(Name);
@@ -209,7 +280,37 @@
         status = await StatusClient.GetAsync(service.Name);
         connections = file is not null && service.Schema is not null ? [.. ConfigEditor.ListConnections(service.Schema, file)] : [];
         settings = BuildSettings();
+        revisions = [.. Store.ListRevisions(service.Name)];
+        history = [.. Audit.ReadLatest(10, service.Name)];
+        expandedRevision = null;
     }
+
+    private async Task RestoreAsync() {
+        if (restoring is not ConfigRevision target) {
+            return;
+        }
+
+        string content = Store.ReadRevision(service!.Name, target.Id);
+
+        if (await SaveContentAsync(content, $"還原至 {FormatTime(target.SavedAt)} 的備份")) {
+            restoring = null;
+        }
+    }
+
+    private static string FormatTime(DateTimeOffset time) =>
+        time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string DescribeChange(ConfigChange change) => change.Change switch {
+        "added" => change.IsSecret ? "目前版本新增（值已隱藏）" : $"目前版本新增 {change.NewValue}",
+        "removed" => change.IsSecret ? "目前版本已移除（值已隱藏）" : $"目前版本已移除（備份中為 {change.OldValue}）",
+        _ => change.IsSecret ? "值不同（已隱藏）" : $"備份 {change.OldValue} → 目前 {change.NewValue}",
+    };
+
+    private static string OutcomeText(ApplyOutcome outcome) => outcome switch {
+        ApplyOutcome.Applied => "已生效",
+        ApplyOutcome.RolledBack => "已自動還原",
+        _ => "未確認",
+    };
 
     private List<SettingRow> BuildSettings() {
         IReadOnlyDictionary<string, string> values = file?.Values ?? new Dictionary<string, string>();
@@ -280,8 +381,11 @@
 
         EnvFile updated = EnvFile.Parse(file.ToString());
         ConfigEditor.Apply(schema, updated, draft);
+        string action = draft.OriginalAlias is null
+            ? $"新增連線 {draft.Alias}"
+            : draft.OriginalAlias == draft.Alias ? $"修改連線 {draft.Alias}" : $"修改連線 {draft.OriginalAlias}，改名為 {draft.Alias}";
 
-        if (await SaveAsync(updated)) {
+        if (await SaveAsync(updated, action)) {
             editorOpen = false;
         }
     }
@@ -295,7 +399,7 @@
         ConfigEditor.Delete(schema, updated, deleting.Alias);
         testResults.Remove(deleting.Alias);
 
-        if (await SaveAsync(updated)) {
+        if (await SaveAsync(updated, $"刪除連線 {deleting.Alias}")) {
             deleting = null;
         }
     }
@@ -319,14 +423,16 @@
             ConfigEditor.SetSetting(updated, row.Name, row.Fallbacks, row.Input);
         }
 
-        await SaveAsync(updated);
+        await SaveAsync(updated, "修改服務設定");
     }
 
-    private async Task<bool> SaveAsync(EnvFile updated) {
+    private async Task<bool> SaveAsync(EnvFile updated, string action) => await SaveContentAsync(updated.ToString(), action);
+
+    private async Task<bool> SaveContentAsync(string content, string action) {
         busy = true;
 
         try {
-            lastResult = await Applier.SaveAsync(service!.Name, updated.ToString());
+            lastResult = await Applier.SaveAsync(service!.Name, content, action);
             Snackbar.Add(lastResult.Message, ResultSeverity(lastResult.Outcome));
             await LoadAsync();
 

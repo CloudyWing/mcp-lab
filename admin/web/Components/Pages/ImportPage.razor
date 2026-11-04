@@ -108,7 +108,7 @@
             ImportPreview current = EnvImporter.Preview(envText, Store);
 
             foreach ((string service, string content) in current.MergedFiles) {
-                results.Add((service, await Applier.SaveAsync(service, content)));
+                results.Add((service, await Applier.SaveAsync(service, content, "從 .env 匯入")));
             }
 
             envText = "";

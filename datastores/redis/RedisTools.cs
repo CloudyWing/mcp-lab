@@ -30,6 +30,7 @@ public sealed class RedisTools {
         ToolResponse.Ok(
             registry.All.Select(kv => new {
                 name = kv.Key,
+                environment = registry.EnvironmentOf(kv.Key),
                 host = kv.Value.Host,
                 port = kv.Value.Port,
                 database = kv.Value.Database,

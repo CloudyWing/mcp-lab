@@ -29,25 +29,40 @@ public sealed record ApplyResult(ApplyOutcome Outcome, string Message, IReadOnly
 public sealed class ConfigApplier {
     private readonly ConfigStore store;
     private readonly ServiceStatusClient statusClient;
+    private readonly AuditLog? auditLog;
     private readonly TimeSpan reloadTimeout;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConfigApplier"/>.
     /// </summary>
-    public ConfigApplier(ConfigStore store, ServiceStatusClient statusClient, TimeSpan? reloadTimeout = null) {
+    public ConfigApplier(ConfigStore store, ServiceStatusClient statusClient, AuditLog? auditLog = null, TimeSpan? reloadTimeout = null) {
         this.store = store;
         this.statusClient = statusClient;
+        this.auditLog = auditLog;
         this.reloadTimeout = reloadTimeout ?? TimeSpan.FromSeconds(8);
     }
 
     /// <summary>
-    /// Saves <paramref name="content"/> as the config file of <paramref name="service"/> and verifies it.
+    /// Saves <paramref name="content"/> as the config file of <paramref name="service"/>, verifies it,
+    /// and records <paramref name="action"/> with the outcome in the audit log.
     /// </summary>
-    public async Task<ApplyResult> SaveAsync(string service, string content, CancellationToken cancellationToken = default) {
+    public async Task<ApplyResult> SaveAsync(string service, string content, string action, CancellationToken cancellationToken = default) {
+        ApplyResult result = await SaveCoreAsync(service, content, cancellationToken).ConfigureAwait(false);
+
+        if (auditLog is not null && result.Message != UnchangedMessage) {
+            await auditLog.AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, service, action, result.Outcome, result.Message), cancellationToken).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    private const string UnchangedMessage = "內容沒有變更。";
+
+    private async Task<ApplyResult> SaveCoreAsync(string service, string content, CancellationToken cancellationToken) {
         string previous = store.Read(service);
 
         if (previous == content) {
-            return new(ApplyOutcome.Applied, "內容沒有變更。", []);
+            return new(ApplyOutcome.Applied, UnchangedMessage, []);
         }
 
         ServiceStatusResult before = await statusClient.GetAsync(service, cancellationToken).ConfigureAwait(false);

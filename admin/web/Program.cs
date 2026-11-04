@@ -24,6 +24,7 @@ builder.Services.AddSingleton(new ServiceEndpoints(serviceUrlTemplate));
 builder.Services.AddSingleton(new AdminPassword(Environment.GetEnvironmentVariable(AdminPassword.VariableName)));
 builder.Services.AddHttpClient<ServiceStatusClient>();
 builder.Services.AddSingleton<ConnectionTester>();
+builder.Services.AddSingleton<AuditLog>();
 builder.Services.AddScoped<ConfigApplier>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

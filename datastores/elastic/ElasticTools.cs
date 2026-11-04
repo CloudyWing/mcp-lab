@@ -34,7 +34,7 @@ public sealed class ElasticTools {
     [McpServerTool, Description("列出所有已設定的 Elasticsearch 連線")]
     public string ListConnections() =>
         ToolResponse.Ok(
-            registry.All.Select(kv => new { name = kv.Key, url = kv.Value.Url, user = kv.Value.User }),
+            registry.All.Select(kv => new { name = kv.Key, environment = registry.EnvironmentOf(kv.Key), url = kv.Value.Url, user = kv.Value.User }),
             "Configured Elasticsearch connections."
         );
 
