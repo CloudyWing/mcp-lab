@@ -9,13 +9,10 @@ services:
     extends:
       file: ../../policies/base.yml
       service: default-policy
-    env_file:
-      - path: ../../.env
-        required: false
     environment:
-      MCPLAB_DOTENV_PATH: /app/.env
+      MCPLAB_DOTENV_PATH: /app/config/service.env
     volumes:
-      - ../../.env:/app/.env:ro
+      - ../../config/mcp-oracle:/app/config:ro
     ports:
       - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_ORACLE_PORT:-9801}:8080"
     healthcheck:

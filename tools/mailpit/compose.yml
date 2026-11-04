@@ -9,15 +9,10 @@ services:
     extends:
       file: ../../policies/base.yml
       service: default-policy
-    env_file:
-      - path: ../../.env
-        required: false
     environment:
-      MCPLAB_DOTENV_PATH: /app/.env
-      MAILPIT_CONN_DEFAULT_NAME: ${MAILPIT_CONN_DEFAULT_NAME:-default}
-      MAILPIT_CONN_DEFAULT_URL: ${MAILPIT_CONN_DEFAULT_URL:-http://host.docker.internal:8025}
+      MCPLAB_DOTENV_PATH: /app/config/service.env
     volumes:
-      - ../../.env:/app/.env:ro
+      - ../../config/mcp-mailpit:/app/config:ro
     ports:
       - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_MAILPIT_PORT:-9830}:8080"
     healthcheck:

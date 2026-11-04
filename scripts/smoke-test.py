@@ -205,7 +205,10 @@ def main() -> int:
     parser.add_argument(
         "--check-hot-reload",
         action="store_true",
-        help="Temporarily modify MSSQL_CONN_*_HOST in .env and verify list_connections reflects the change.",
+        help=(
+            "Temporarily edit config/mcp-sql-server/service.env and verify list_connections reflects "
+            "changed, added, and removed connections without a restart."
+        ),
     )
     args = parser.parse_args()
 
@@ -225,6 +228,7 @@ def main() -> int:
         lambda: check_access_token(status_by_service, args.timeout_seconds),
     )
     runner.check("container security policy is enforced", check_container_security)
+    runner.check("containers only receive their own config", check_config_isolation)
     runner.check("HTTP health endpoints are available", lambda: check_health_endpoints(status_by_service))
     runner.check(
         "API Contract MCP is reachable",
@@ -236,7 +240,7 @@ def main() -> int:
     )
     if args.check_hot_reload:
         runner.check(
-            "SQL Server MCP reloads .env connection changes",
+            "SQL Server MCP reloads service.env changes without restart",
             lambda: check_sql_server_hot_reload(status_by_service, args.timeout_seconds),
         )
     runner.check(
@@ -356,6 +360,28 @@ def check_access_token(status_by_service: dict[str, dict[str, Any]], timeout_sec
     raise SmokeError("Request without a token was accepted.")
 
 
+def check_config_isolation() -> None:
+    completed = run_command(["docker", "inspect", *EXPECTED_SERVICES])
+    leaks: list[str] = []
+
+    for container in json.loads(completed.stdout):
+        name = str(container.get("Name", "")).lstrip("/")
+        env_keys = [item.split("=", 1)[0] for item in container.get("Config", {}).get("Env") or []]
+        leaked = [key for key in env_keys if "_CONN_" in key or key.endswith("PASSWORD") or key == "MCPLAB_MCP_TOKEN"]
+        if leaked:
+            leaks.append(f"{name} env: {', '.join(sorted(leaked))}")
+
+        for mount in container.get("Mounts") or []:
+            source = str(mount.get("Source", ""))
+            if mount.get("Destination") == "/app/config" and not source.rstrip("/").endswith(f"/config/{name}"):
+                leaks.append(f"{name} mounts {source} at /app/config")
+            if source.endswith("/.env"):
+                leaks.append(f"{name} mounts the root .env")
+
+    if leaks:
+        raise SmokeError("; ".join(leaks))
+
+
 def check_container_security() -> None:
     completed = run_command(["docker", "inspect", *EXPECTED_SERVICES])
     containers = json.loads(completed.stdout)
@@ -415,30 +441,45 @@ def check_sql_server(status_by_service: dict[str, dict[str, Any]], timeout_secon
 
 
 def check_sql_server_hot_reload(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
-    env_path = REPO_ROOT / ".env"
+    env_path = service_config_path("mcp-sql-server")
     if not env_path.exists():
-        raise SkipCheck(".env does not exist")
+        raise SkipCheck(f"{env_path.relative_to(REPO_ROOT)} does not exist; run scripts/init-config.py")
 
     original_text = env_path.read_text(encoding="utf-8-sig")
     host_match = re.search(r"^(MSSQL_CONN_[A-Z0-9]+_HOST=)([^\r\n]*)", original_text, flags=re.MULTILINE)
     if not host_match:
-        raise SkipCheck(".env does not contain MSSQL_CONN_*_HOST")
+        raise SkipCheck(f"{env_path.relative_to(REPO_ROOT)} does not contain MSSQL_CONN_*_HOST")
 
     original_host = host_match.group(2)
     replacement_host = f"hot-reload-{uuid.uuid4().hex}.invalid"
+    added_host = f"hot-reload-added-{uuid.uuid4().hex}.invalid"
+    added_connection = (
+        f"\nMSSQL_CONN_SMOKEADDED_NAME=smoke-added\nMSSQL_CONN_SMOKEADDED_HOST={added_host}\n"
+        "MSSQL_CONN_SMOKEADDED_USER=smoke\nMSSQL_CONN_SMOKEADDED_PASSWORD=smoke\n"
+        "MSSQL_CONN_SMOKEADDED_DATABASE=master\n"
+    )
     client = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
 
     try:
         updated_text = original_text[:host_match.start(2)] + replacement_host + original_text[host_match.end(2):]
         env_path.write_text(updated_text, encoding="utf-8")
         wait_for_sql_server_host(client, replacement_host, timeout_seconds)
+
+        env_path.write_text(original_text.rstrip("\n") + "\n" + added_connection, encoding="utf-8")
+        wait_for_sql_server_host(client, added_host, timeout_seconds)
     finally:
         env_path.write_text(original_text, encoding="utf-8")
 
     wait_for_sql_server_host(client, original_host, timeout_seconds)
+    wait_for_sql_server_host(client, added_host, timeout_seconds, expect_present=False)
 
 
-def wait_for_sql_server_host(client: McpClient, expected_host: str, timeout_seconds: int) -> None:
+def wait_for_sql_server_host(
+    client: McpClient,
+    expected_host: str,
+    timeout_seconds: int,
+    expect_present: bool = True,
+) -> None:
     deadline = time.monotonic() + max(timeout_seconds, 3)
     last_hosts: list[str] = []
 
@@ -451,12 +492,13 @@ def wait_for_sql_server_host(client: McpClient, expected_host: str, timeout_seco
             if isinstance(item, dict) and item.get("host") is not None
         ]
 
-        if expected_host in last_hosts:
+        if (expected_host in last_hosts) == expect_present:
             return
 
         time.sleep(0.2)
 
-    raise SmokeError(f"SQL Server list_connections did not report host {expected_host!r}. Last hosts: {last_hosts}")
+    state = "report" if expect_present else "drop"
+    raise SmokeError(f"SQL Server list_connections did not {state} host {expected_host!r}. Last hosts: {last_hosts}")
 
 
 def check_oracle(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int, include_oracle: bool) -> None:
@@ -820,15 +862,25 @@ def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     return completed
 
 
+def service_config_path(service: str) -> Path:
+    return REPO_ROOT / "config" / service / "service.env"
+
+
 def read_setting(name: str) -> str:
+    """Reads a setting from the process environment, the SQL Server service config, or the root .env."""
     value = os.environ.get(name)
     if value is None:
-        env_path = REPO_ROOT / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
+        for path in (service_config_path("mcp-sql-server"), REPO_ROOT / ".env"):
+            if not path.exists():
+                continue
+
+            for line in path.read_text(encoding="utf-8-sig").splitlines():
                 key, separator, raw = line.partition("=")
                 if separator and key.strip() == name:
                     value = raw.strip().strip('"').strip("'")
+
+            if value is not None:
+                break
 
     return (value or "").strip()
 

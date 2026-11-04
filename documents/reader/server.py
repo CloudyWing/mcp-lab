@@ -21,7 +21,7 @@ FastMCPSettings.model_config["env_file"] = None
 
 MOUNT_ROOT = Path("/host_root").resolve()
 RAW_HOST_MOUNT_ROOT = os.environ.get("DOCUMENT_HOST_MOUNT_ROOT", "/").strip()
-DOTENV_PATH = os.environ.get("MCPLAB_DOTENV_PATH", "/app/.env").strip() or "/app/.env"
+DOTENV_PATH = os.environ.get("MCPLAB_DOTENV_PATH", "/app/config/service.env").strip() or "/app/config/service.env"
 _SNAPSHOT = DotEnvSnapshot.from_environment()
 _WATCHER = DotEnvWatcher(DOTENV_PATH, _SNAPSHOT)
 

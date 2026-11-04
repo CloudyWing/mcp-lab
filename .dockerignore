@@ -65,3 +65,5 @@ temp/
 volumes/
 backups/
 secrets/
+config/
+.env.bak

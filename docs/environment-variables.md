@@ -4,19 +4,19 @@
 
 | 變數或模式 | 熱重載 | 說明 |
 | --- | --- | --- |
-| `*_CONN_*` | runtime | 各 MCP 服務的連線設定。修改 `.env` 後，下一次呼叫 `list_connections()` 或實際工具時生效 |
+| `*_CONN_*` | runtime | 各 MCP 服務的連線設定。修改 `config/<服務>/service.env` 後，下一次呼叫 `list_connections()` 或實際工具時生效 |
 | `QUERY_TIMEOUT`、`*_QUERY_TIMEOUT` | runtime | SQL Server 與 Oracle 查詢逾時秒數 |
 | `MAX_ROWS`、`*_MAX_ROWS`、`ES_SEARCH_SIZE` | runtime | 查詢、搜尋或列舉的回傳量限制 |
 | `DOCUMENT_MAX_IMAGES`、`DOCUMENT_MAX_TEXT_MB`、`DOCUMENT_LIST_*`、`DOCUMENT_SEARCH_*`、`DOCUMENT_XLSX_*` | runtime | Reader 文件讀取、列舉、搜尋與 XLSX 解析限制 |
 | `DOCUMENT_HOST_MOUNT_ROOT`、`DOCUMENT_HOST_MOUNT_SOURCE` | build-time | Reader host 路徑根與 Docker volume 掛載來源；修改後需重建或重啟 Compose service |
-| `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `.env` |
+| `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `config/<服務>/service.env` |
 | `MCPLAB_MCP_TOKEN` | runtime | MCP endpoint 的 Bearer token；留空則不檢查 |
 | `*_MAX_CELL_CHARS` | runtime | SQL Server 與 Oracle 單一欄位回傳字元上限 |
 | `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
 | `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
 | `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
 
-runtime 變數由容器內服務監聽 `/app/.env` 後套用；build-time 變數由 Docker Compose 或測試腳本在啟動時讀取。
+runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/app/config/service.env` 後套用，範本為 `config/services.env.example`。build-time 變數放在根目錄 `.env`，由 Docker Compose 或測試腳本在啟動時讀取，範本為 `.env.example`。
 
 ## 基底映像
 
@@ -56,8 +56,8 @@ runtime 變數由容器內服務監聽 `/app/.env` 後套用；build-time 變數
 | --- | --- | --- |
 | `DOCKER_GID` | `1001` | native Linux Docker socket 的 group id；Docker Desktop 另會使用 root group 存取 socket |
 | `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | 容器內 Docker socket 路徑 |
-| `MCPLAB_RUNTIME_UID` | `1000` | MCP 服務容器的非 root 使用者 UID，需能讀取掛載的 `.env` |
-| `MCPLAB_RUNTIME_GID` | `1000` | MCP 服務容器的非 root 使用者 GID，需能讀取掛載的 `.env` |
+| `MCPLAB_RUNTIME_UID` | `1000` | MCP 服務容器的非 root 使用者 UID，需能讀取掛載的 `service.env` |
+| `MCPLAB_RUNTIME_GID` | `1000` | MCP 服務容器的非 root 使用者 GID，需能讀取掛載的 `service.env` |
 
 ## 資料服務工具限制
 

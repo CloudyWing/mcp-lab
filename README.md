@@ -22,7 +22,7 @@ AI Agent 在沒有專屬工具的情況下操作資料庫時，通常會透過�
 
 ## 多連線支援
 
-每個服務支援同時連線多個實例，以 `{TYPE}_CONN_{ALIAS}_*` 格式設定（`ALIAS` 為大寫英數，如 `PROD`、`STAGE`）：
+每個服務支援同時連線多個實例，在該服務的 `config/<服務>/service.env` 以 `{TYPE}_CONN_{ALIAS}_*` 格式設定（`ALIAS` 為大寫英數，如 `PROD`、`STAGE`）。以下為 `config/mcp-sql-server/service.env` 範例：
 
 ```env
 MSSQL_CONN_PROD_NAME=production
@@ -56,9 +56,27 @@ Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="st
 
 ```bash
 cp .env.example .env
-# 填入至少一個連線設定
+python3 scripts/init-config.py
+# 在 config/<服務>/service.env 填入至少一個連線設定
 docker compose up -d --build
 docker compose ps
+```
+
+設定分成兩層：
+
+- 根目錄 `.env`：Compose 層設定，例如對外埠、映像標籤、UID/GID、Reader 掛載路徑。修改後需重新建立容器。
+- `config/<服務>/service.env`：各服務的連線與查詢限制。每個容器只掛載自己的 `config/<服務>` 目錄，不會讀到其他服務的帳密，修改後不需重啟容器。
+
+`scripts/init-config.py` 會為每個服務建立 `service.env`，已存在的檔案不會覆寫（`--force` 可強制覆寫）。內容來源：
+
+- 根目錄 `.env` 已有該服務的設定時，從 `.env` 搬移，適用於從舊版升級。
+- 否則從 `config/services.env.example` 範本建立。
+
+從舊版升級時，可加上 `--strip-env`，把已搬移的設定從 `.env` 移除，原檔備份為 `.env.bak`：
+
+```bash
+python3 scripts/init-config.py --strip-env
+docker compose up -d --force-recreate
 ```
 
 `mcp-docker` 需要掛載 Docker socket，預設不啟動。需要時以 profile 啟動：
@@ -71,7 +89,7 @@ docker compose --profile docker up -d --build
 
 所有 MCP 服務的對外埠預設只綁定 `127.0.0.1`，同一區網的其他主機無法連線。確實需要對外開放時，可設定 `MCP_BIND_ADDRESS`（例如 `0.0.0.0`），修改後需重新建立容器。
 
-若要要求 MCP client 帶 token，設定 `MCPLAB_MCP_TOKEN`。設定後除了 `/health` 以外的請求都必須帶 `Authorization: Bearer <token>`，否則回傳 HTTP 401。此設定會熱重載，修改 `.env` 後不需重啟容器；留空則不檢查。
+若要要求 MCP client 帶 token，設定 `MCPLAB_MCP_TOKEN`。設定後除了 `/health` 以外的請求都必須帶 `Authorization: Bearer <token>`，否則回傳 HTTP 401。此設定位於各服務的 `service.env`，會熱重載，修改後不需重啟容器；留空則不檢查。`scripts/init-config.py` 會把同一個值複製到每個服務。
 
 ```env
 MCPLAB_MCP_TOKEN=<隨機產生的長字串>
@@ -91,11 +109,11 @@ MCP client 設定範例（HTTP transport）：
 
 ## 設定熱重載
 
-各 MCP 服務會把專案根目錄的 `.env` 以唯讀方式掛載到容器內 `/app/.env`，並由服務進程監聽檔案內容。修改 `.env` 後，不需要重啟容器；下一次呼叫 `list_connections()`、`list_runtime_limits()` 或實際查詢工具時會讀取新的 runtime 設定。
+各 MCP 服務會把 `config/<服務>` 目錄以唯讀方式掛載到容器內 `/app/config`，並由服務進程監聽 `/app/config/service.env`。修改後不需要重啟容器；下一次呼叫 `list_connections()`、`list_runtime_limits()` 或實際查詢工具時會讀取新的 runtime 設定。新增、修改與刪除連線都會生效。
 
-熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_GID`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
+熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定位於根目錄 `.env`，不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_GID`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
 
-`.env` 變更後通常會在 1 秒內生效。若 `.env` 語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
+`service.env` 變更後通常會在 1 秒內生效。若語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
 
 ## 測試
 
@@ -105,7 +123,7 @@ MCP client 設定範例（HTTP transport）：
 dotnet test
 ```
 
-本機整合 smoke test 需要 Docker Compose 堆疊已啟動，並且 `.env` 已指向可連線的測試環境：
+本機整合 smoke test 需要 Docker Compose 堆疊已啟動，並且 `config/<服務>/service.env` 已指向可連線的測試環境：
 
 ```bash
 python3 scripts/smoke-test.py
@@ -114,9 +132,9 @@ python3 scripts/smoke-test.py --check-hot-reload
 
 此腳本會檢查 Compose 容器健康狀態、`read_only`、`cap_drop: [ALL]`、`no-new-privileges`、`/tmp`
 tmpfs、非 root 使用者，並呼叫各 MCP 服務的 ping 或唯讀查詢工具。SQL Server 與 Oracle 會驗證
-`query` 工具拒絕同一段輸入中的寫入語句。加入 `--check-hot-reload` 時，腳本會暫時修改 `.env` 中第一個 `MSSQL_CONN_*_HOST`，確認 `list_connections()` 在 1 秒內反映新值後還原原檔。
+`query` 工具拒絕同一段輸入中的寫入語句。加入 `--check-hot-reload` 時，腳本會暫時修改 `config/mcp-sql-server/service.env` 中第一個 `MSSQL_CONN_*_HOST`，並新增後移除一組連線，確認 `list_connections()` 不需重啟就反映修改、新增與刪除，最後還原原檔。
 
-Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `.env` 已設定可查詢的 Oracle 連線，可明確啟用：
+Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `config/mcp-oracle/service.env` 已設定可查詢的 Oracle 連線，可明確啟用：
 
 ```bash
 python3 scripts/smoke-test.py --include-oracle
@@ -136,7 +154,7 @@ python3 scripts/check-all.py --build-services --smoke --include-oracle
 
 ## 設定原則
 
-`.env.example` 不預設任何主機位址，請依你的部署位置填寫。
+`config/services.env.example` 不預設任何主機位址，請依你的部署位置填寫。
 
 常見情境：
 

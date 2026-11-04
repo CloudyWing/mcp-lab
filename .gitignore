@@ -62,3 +62,8 @@ temp/
 *.swp
 *.bak
 *~
+# =========================
+# Per-service runtime config (contains credentials)
+# =========================
+config/*/
+.env.bak
