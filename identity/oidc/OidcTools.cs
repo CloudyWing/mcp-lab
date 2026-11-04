@@ -124,6 +124,13 @@ public sealed class OidcTools {
                 .ConfigureAwait(false);
             IReadOnlyList<JsonWebKey> keys = await documentClient.GetJsonWebKeysAsync(cfg, discovery)
                 .ConfigureAwait(false);
+
+            // The provider may have rotated its keys since the JWKS was cached; fetch it again once.
+            if (NeedsKeyRefresh(normalizedToken, keys)) {
+                discovery = await documentClient.GetDiscoveryDocumentAsync(cfg, forceRefresh: true).ConfigureAwait(false);
+                keys = await documentClient.GetJsonWebKeysAsync(cfg, discovery, forceRefresh: true).ConfigureAwait(false);
+            }
+
             string targetAudience = string.IsNullOrWhiteSpace(audience) ? cfg.Audience : audience.Trim();
             int safeClockSkewSeconds = ToolRuntimeOptions.NormalizeRequestedInt32(
                 clockSkewSeconds,
@@ -144,6 +151,21 @@ public sealed class OidcTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    /// <summary>
+    /// Returns whether the token names a signing key id that the cached key set does not contain.
+    /// </summary>
+    public static bool NeedsKeyRefresh(string token, IReadOnlyList<JsonWebKey> keys) {
+        string? kid;
+
+        try {
+            kid = new JwtSecurityTokenHandler().ReadJwtToken(token).Header.Kid;
+        } catch (ArgumentException) {
+            return false;
+        }
+
+        return !string.IsNullOrEmpty(kid) && keys.All(key => key.Kid != kid);
     }
 
     private string ValidateToken(

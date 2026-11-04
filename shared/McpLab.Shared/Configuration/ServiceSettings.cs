@@ -125,8 +125,12 @@ public static class ServiceSettings {
         public static readonly ServiceSetting HttpTimeout =
             new("OIDC_HTTP_TIMEOUT", "讀取 discovery 與 JWKS 的 HTTP 逾時", "seconds", 10, 1, 300);
 
+        /// <summary>How long discovery documents and JWKS are cached.</summary>
+        public static readonly ServiceSetting MetadataCacheSeconds =
+            new("OIDC_METADATA_CACHE_SECONDS", "Discovery 與 JWKS 的快取秒數，0 表示不快取", "seconds", 300, 0, 86400);
+
         /// <summary>All OIDC settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, MetadataCacheSeconds];
     }
 
     /// <summary>RabbitMQ settings.</summary>

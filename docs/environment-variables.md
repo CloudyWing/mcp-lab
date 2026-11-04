@@ -89,6 +89,7 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `ES_HTTP_TIMEOUT` | `30` | Elasticsearch HTTP 逾時秒數，允許 1 到 300 |
 | `API_CONTRACT_HTTP_TIMEOUT` | `15` | API Contract HTTP 逾時秒數，允許 1 到 300 |
 | `OIDC_HTTP_TIMEOUT` | `10` | OIDC discovery 與 JWKS 的 HTTP 逾時秒數，允許 1 到 300 |
+| `OIDC_METADATA_CACHE_SECONDS` | `300` | Discovery 與 JWKS 的快取秒數，0 表示不快取，上限 86400 |
 | `RABBITMQ_HTTP_TIMEOUT` | `10` | RabbitMQ Management API 的 HTTP 逾時秒數，允許 1 到 300 |
 | `MAILPIT_HTTP_TIMEOUT` | `10` | Mailpit API 的 HTTP 逾時秒數，允許 1 到 300 |
 | `API_CONTRACT_DEFAULT_BODY_BYTES` | `50000` | `invoke_endpoint` 預設回傳的 body 位元組數，不超過 `API_CONTRACT_MAX_BODY_BYTES` |

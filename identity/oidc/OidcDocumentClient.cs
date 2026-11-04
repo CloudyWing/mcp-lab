@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 namespace CloudyWing.McpLab.Oidc;
@@ -8,23 +9,34 @@ namespace CloudyWing.McpLab.Oidc;
 public sealed class OidcDocumentClient {
     private readonly IHttpClientFactory httpClientFactory;
     private readonly IDotEnvSnapshotProvider? snapshotProvider;
+    private readonly ConcurrentDictionary<string, (string Body, DateTimeOffset ExpiresAt)> cache = new(StringComparer.Ordinal);
+    private readonly TimeProvider timeProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="OidcDocumentClient"/>.
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
     /// <param name="snapshotProvider">The .env snapshot provider used to read OIDC_HTTP_TIMEOUT.</param>
-    public OidcDocumentClient(IHttpClientFactory httpClientFactory, IDotEnvSnapshotProvider? snapshotProvider = null) {
+    /// <param name="timeProvider">Clock used for cache expiry; defaults to the system clock.</param>
+    public OidcDocumentClient(
+        IHttpClientFactory httpClientFactory,
+        IDotEnvSnapshotProvider? snapshotProvider = null,
+        TimeProvider? timeProvider = null
+    ) {
         this.httpClientFactory = httpClientFactory;
         this.snapshotProvider = snapshotProvider;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    private IReadOnlyDictionary<string, string> Settings => snapshotProvider?.Current ?? new Dictionary<string, string>();
+
     /// <summary>
-    /// Gets the OpenID Connect discovery document for a profile.
+    /// Gets the OpenID Connect discovery document for a profile. Responses are cached for
+    /// OIDC_METADATA_CACHE_SECONDS unless <paramref name="forceRefresh"/> is set.
     /// </summary>
-    public async Task<OpenIdConnectConfiguration> GetDiscoveryDocumentAsync(ConnectionConfig cfg) {
+    public async Task<OpenIdConnectConfiguration> GetDiscoveryDocumentAsync(ConnectionConfig cfg, bool forceRefresh = false) {
         EnsureAllowedMetadataUrl(cfg.DiscoveryUrl, cfg.RequireHttpsMetadata);
-        string json = await GetStringAsync(cfg.DiscoveryUrl).ConfigureAwait(false);
+        string json = await GetStringAsync(cfg.DiscoveryUrl, forceRefresh).ConfigureAwait(false);
 
         return OpenIdConnectConfiguration.Create(json);
     }
@@ -34,9 +46,10 @@ public sealed class OidcDocumentClient {
     /// </summary>
     public async Task<IReadOnlyList<JsonWebKey>> GetJsonWebKeysAsync(
         ConnectionConfig cfg,
-        OpenIdConnectConfiguration? discovery = null
+        OpenIdConnectConfiguration? discovery = null,
+        bool forceRefresh = false
     ) {
-        OpenIdConnectConfiguration document = discovery ?? await GetDiscoveryDocumentAsync(cfg).ConfigureAwait(false);
+        OpenIdConnectConfiguration document = discovery ?? await GetDiscoveryDocumentAsync(cfg, forceRefresh).ConfigureAwait(false);
         string jwksUri = document.JwksUri ?? "";
 
         if (string.IsNullOrWhiteSpace(jwksUri)) {
@@ -44,15 +57,34 @@ public sealed class OidcDocumentClient {
         }
 
         EnsureAllowedMetadataUrl(jwksUri, cfg.RequireHttpsMetadata);
-        string json = await GetStringAsync(jwksUri).ConfigureAwait(false);
+        string json = await GetStringAsync(jwksUri, forceRefresh).ConfigureAwait(false);
         JsonWebKeySet keySet = new(json);
 
         return keySet.Keys.ToArray();
     }
 
-    private async Task<string> GetStringAsync(string url) {
+    private async Task<string> GetStringAsync(string url, bool forceRefresh) {
+        int cacheSeconds = ServiceSettings.Oidc.MetadataCacheSeconds.Read(Settings);
+        DateTimeOffset now = timeProvider.GetUtcNow();
+
+        if (!forceRefresh && cacheSeconds > 0 && cache.TryGetValue(url, out (string Body, DateTimeOffset ExpiresAt) cached) && cached.ExpiresAt > now) {
+            return cached.Body;
+        }
+
+        string body = await FetchAsync(url).ConfigureAwait(false);
+
+        if (cacheSeconds > 0) {
+            cache[url] = (body, now.AddSeconds(cacheSeconds));
+        } else {
+            cache.TryRemove(url, out _);
+        }
+
+        return body;
+    }
+
+    private async Task<string> FetchAsync(string url) {
         using HttpClient http = httpClientFactory.CreateClient(ConnectionRegistry.ClientKey);
-        http.Timeout = ServiceSettings.Oidc.HttpTimeout.ReadSeconds(snapshotProvider?.Current ?? new Dictionary<string, string>());
+        http.Timeout = ServiceSettings.Oidc.HttpTimeout.ReadSeconds(Settings);
         using HttpResponseMessage response = await http.GetAsync(url).ConfigureAwait(false);
         string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 

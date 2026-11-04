@@ -330,6 +330,8 @@ OIDC_CONN_LOCAL_AUDIENCE=account
 
 正式或測試環境建議維持 `OIDC_CONN_<ALIAS>_REQUIRE_HTTPS_METADATA=true`。
 
+Discovery document 與 JWKS 會快取 `OIDC_METADATA_CACHE_SECONDS` 秒（預設 300，0 表示不快取）。`validate_jwt` 遇到快取中沒有的 `kid` 時，會重新取得一次 JWKS，以支援 provider 輪替金鑰。
+
 ### 可用工具
 
 | 工具 | 說明 |
