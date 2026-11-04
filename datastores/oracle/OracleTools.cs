@@ -62,15 +62,16 @@ public sealed class OracleTools {
     /// 測試 Oracle 連線是否正常
     /// </summary>
     [McpServerTool, Description("測試 Oracle 連線是否正常")]
-    public string PingConnection(
-        [Description("連線名稱，省略則使用第一個")] string connection = ""
+    public async Task<string> PingConnection(
+        [Description("連線名稱，省略則使用第一個")] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
         try {
-            using OracleConnection conn = registry.Open(connection);
+            await using OracleConnection conn = await registry.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using OracleCommand cmd = new("SELECT banner FROM v$version WHERE ROWNUM = 1", conn) {
                 CommandTimeout = 10
             };
-            string ver = cmd.ExecuteScalar()?.ToString() ?? "";
+            string ver = (await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))?.ToString() ?? "";
             return ToolResponse.Ok(new {
                 version = ver[..Math.Min(120, ver.Length)],
             });
@@ -83,12 +84,13 @@ public sealed class OracleTools {
     /// 列出 Oracle 資料表（owner 省略則顯示目前使用者的）
     /// </summary>
     [McpServerTool, Description("列出 Oracle 資料表（owner 省略則顯示目前使用者的）")]
-    public string ListTables(
+    public async Task<string> ListTables(
         [Description("Schema 擁有者，省略則列出當前使用者的資料表")] string owner = "",
-        [Description("連線名稱")] string connection = ""
+        [Description("連線名稱")] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
         try {
-            using OracleConnection conn = registry.Open(connection);
+            await using OracleConnection conn = await registry.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using OracleCommand cmd = conn.CreateCommand();
             cmd.CommandTimeout = QueryTimeout;
 
@@ -101,10 +103,10 @@ public sealed class OracleTools {
                 cmd.CommandText = "SELECT table_name FROM user_tables ORDER BY table_name";
             }
 
-            using OracleDataReader rdr = cmd.ExecuteReader();
+            await using OracleDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             List<string> rows = [];
 
-            while (rdr.Read()) {
+            while (await rdr.ReadAsync(cancellationToken).ConfigureAwait(false)) {
                 rows.Add(rdr.FieldCount == 2 ? $"{rdr[0]}.{rdr[1]}" : rdr.GetString(0));
             }
 
@@ -120,13 +122,14 @@ public sealed class OracleTools {
     /// 描述 Oracle 資料表欄位結構
     /// </summary>
     [McpServerTool, Description("描述 Oracle 資料表欄位結構")]
-    public string DescribeTable(
+    public async Task<string> DescribeTable(
         [Description("資料表名稱")] string table,
         [Description("Schema 擁有者，省略則查詢當前使用者")] string owner = "",
-        [Description("連線名稱")] string connection = ""
+        [Description("連線名稱")] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
         try {
-            using OracleConnection conn = registry.Open(connection);
+            await using OracleConnection conn = await registry.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using OracleCommand cmd = conn.CreateCommand();
             cmd.CommandTimeout = QueryTimeout;
 
@@ -145,10 +148,10 @@ public sealed class OracleTools {
                 cmd.Parameters.Add("t", table.ToUpperInvariant());
             }
 
-            using OracleDataReader rdr = cmd.ExecuteReader();
+            await using OracleDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             List<string> lines = [];
 
-            while (rdr.Read()) {
+            while (await rdr.ReadAsync(cancellationToken).ConfigureAwait(false)) {
                 string typeName = rdr.GetString(1);
 
                 if (!rdr.IsDBNull(4)) {
@@ -173,11 +176,12 @@ public sealed class OracleTools {
     /// 執行唯讀 Oracle SQL 查詢（僅允許 SELECT / WITH）
     /// </summary>
     [McpServerTool, Description("執行唯讀 Oracle SQL 查詢（僅允許 SELECT / WITH）")]
-    public string Query(
+    public async Task<string> Query(
         [Description("SQL 查詢（SELECT 或 WITH 開頭）")] string sql,
-        [Description("連線名稱")] string connection = ""
+        [Description("連線名稱")] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
-        return RunQuery(sql, connection);
+        return await RunQueryAsync(sql, connection, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -186,9 +190,10 @@ public sealed class OracleTools {
     [McpServerTool, Description(
         "執行唯讀 Oracle SQL 查詢（Base64）。避免傳輸過程清洗字元。" +
         "當字串常值、JSON 等內容被清洗（例如單引號消失）時，請改用本工具。")]
-    public string QueryBase64(
+    public async Task<string> QueryBase64(
         [Description("Base64 編碼的 SQL（SELECT 或 WITH 開頭）")] string sqlBase64,
-        [Description("連線名稱")] string connection = ""
+        [Description("連線名稱")] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             sqlBase64,
@@ -200,10 +205,10 @@ public sealed class OracleTools {
             return ToolResponse.Error(error);
         }
 
-        return RunQuery(sql, connection);
+        return await RunQueryAsync(sql, connection, cancellationToken).ConfigureAwait(false);
     }
 
-    private string RunQuery(string sql, string connection) {
+    private async Task<string> RunQueryAsync(string sql, string connection, CancellationToken cancellationToken) {
         string upper = sql.TrimStart().ToUpperInvariant();
 
         if (!upper.StartsWith("SELECT") && !upper.StartsWith("WITH")) {
@@ -213,11 +218,11 @@ public sealed class OracleTools {
         try {
             SqlGuard.ValidateReadOnlyQuery(sql);
             SqlGuard.Validate(sql);
-            using OracleConnection conn = registry.Open(connection);
+            await using OracleConnection conn = await registry.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using OracleCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
-            using OracleDataReader rdr = cmd.ExecuteReader();
+            await using OracleDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-            return ToolResponse.Ok(ReadResultSet(rdr));
+            return ToolResponse.Ok(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
         } catch (InvalidOperationException ex) {
             return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
@@ -231,11 +236,12 @@ public sealed class OracleTools {
     [McpServerTool, Description(
         "執行 Oracle SQL / PL/SQL（INSERT / UPDATE / DELETE / DDL / ANONYMOUS BLOCK）。" +
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
-    public string Execute(
+    public async Task<string> Execute(
         [Description("SQL 或 PL/SQL 語句")] string sql,
-        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
-        return RunExecute(sql, connection);
+        return await RunExecuteAsync(sql, connection, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -245,9 +251,10 @@ public sealed class OracleTools {
         "執行 Oracle SQL / PL/SQL（Base64）。避免傳輸過程清洗字元。" +
         "當字串常值、JSON 等內容被清洗（例如單引號消失）時，請改用本工具。" +
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
-    public string ExecuteBase64(
+    public async Task<string> ExecuteBase64(
         [Description("Base64 編碼的 SQL 或 PL/SQL")] string sqlBase64,
-        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = "",
+        CancellationToken cancellationToken = default
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             sqlBase64,
@@ -259,26 +266,26 @@ public sealed class OracleTools {
             return ToolResponse.Error(error);
         }
 
-        return RunExecute(sql, connection);
+        return await RunExecuteAsync(sql, connection, cancellationToken).ConfigureAwait(false);
     }
 
-    private string RunExecute(string sql, string connection) {
+    private async Task<string> RunExecuteAsync(string sql, string connection, CancellationToken cancellationToken) {
         if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
             return blocked;
         }
 
         try {
             SqlGuard.Validate(sql);
-            using OracleConnection conn = registry.Open(connection);
+            await using OracleConnection conn = await registry.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             using OracleCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
             string upper = sql.TrimStart().ToUpperInvariant();
 
             if (upper.StartsWith("SELECT") || upper.StartsWith("WITH")) {
-                using OracleDataReader rdr = cmd.ExecuteReader();
-                return ToolResponse.Ok(ReadResultSet(rdr));
+                await using OracleDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                return ToolResponse.Ok(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
             }
 
-            int affected = cmd.ExecuteNonQuery();
+            int affected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             return ToolResponse.Ok(new {
                 affected_rows = affected >= 0 ? (int?)affected : null,
@@ -290,5 +297,6 @@ public sealed class OracleTools {
         }
     }
 
-    private object ReadResultSet(OracleDataReader rdr) => SqlResultSetReader.Read(rdr, MaxRows, MaxCellChars);
+    private Task<object> ReadResultSetAsync(OracleDataReader rdr, CancellationToken cancellationToken) =>
+        SqlResultSetReader.ReadAsync(rdr, MaxRows, MaxCellChars, cancellationToken);
 }

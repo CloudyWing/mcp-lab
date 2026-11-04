@@ -19,7 +19,7 @@ public static class SqlResultSetReader {
     /// <summary>
     /// Reads at most <paramref name="maxRows"/> rows and cuts cell text longer than <paramref name="maxCellChars"/>.
     /// </summary>
-    public static object Read(DbDataReader reader, int maxRows, int maxCellChars) {
+    public static async Task<object> ReadAsync(DbDataReader reader, int maxRows, int maxCellChars, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRows);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCellChars);
@@ -29,7 +29,7 @@ public static class SqlResultSetReader {
         int truncatedCells = 0;
         bool truncated = false;
 
-        while (reader.Read()) {
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
             if (rows.Count >= maxRows) {
                 truncated = true;
                 break;

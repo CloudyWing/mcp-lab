@@ -11,10 +11,10 @@ internal sealed class SqlResultSetReaderTests {
     [TestCase(3, 3, false)]
     [TestCase(3, 5, false)]
     [TestCase(5, 3, true)]
-    public void Read_RowCountAgainstLimit_ReportsTruncatedOnlyWhenRowsRemain(int rowCount, int maxRows, bool expectedTruncated) {
+    public async Task ReadAsync_RowCountAgainstLimit_ReportsTruncatedOnlyWhenRowsRemain(int rowCount, int maxRows, bool expectedTruncated) {
         using DataTableReader reader = CreateTable(rowCount, "v").CreateDataReader();
 
-        JsonNode result = ToJson(SqlResultSetReader.Read(reader, maxRows, 100));
+        JsonNode result = ToJson(await SqlResultSetReader.ReadAsync(reader, maxRows, 100));
 
         Assert.Multiple(() => {
             Assert.That(result["returned_count"]!.GetValue<int>(), Is.EqualTo(Math.Min(rowCount, maxRows)));
@@ -23,10 +23,10 @@ internal sealed class SqlResultSetReaderTests {
     }
 
     [Test]
-    public void Read_LongCell_CutsTextAndCountsTruncatedCells() {
+    public async Task ReadAsync_LongCell_CutsTextAndCountsTruncatedCells() {
         using DataTableReader reader = CreateTable(2, new string('x', 50)).CreateDataReader();
 
-        JsonNode result = ToJson(SqlResultSetReader.Read(reader, 10, 10));
+        JsonNode result = ToJson(await SqlResultSetReader.ReadAsync(reader, 10, 10));
         string cell = result["rows"]![0]![0]!.GetValue<string>();
 
         Assert.Multiple(() => {
@@ -37,13 +37,13 @@ internal sealed class SqlResultSetReaderTests {
     }
 
     [Test]
-    public void Read_NullCell_ReturnsNullText() {
+    public async Task ReadAsync_NullCell_ReturnsNullText() {
         DataTable table = new();
         table.Columns.Add("value", typeof(string));
         table.Rows.Add(DBNull.Value);
         using DataTableReader reader = table.CreateDataReader();
 
-        JsonNode result = ToJson(SqlResultSetReader.Read(reader, 10, 10));
+        JsonNode result = ToJson(await SqlResultSetReader.ReadAsync(reader, 10, 10));
 
         Assert.That(result["rows"]![0]![0]!.GetValue<string>(), Is.EqualTo("NULL"));
     }

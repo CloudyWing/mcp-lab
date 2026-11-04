@@ -42,11 +42,18 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// <summary>
     /// Opens and returns a new <see cref="OracleConnection"/> for the specified named connection.
     /// </summary>
-    public OracleConnection Open(string? connectionName) {
+    public async Task<OracleConnection> OpenAsync(string? connectionName, CancellationToken cancellationToken) {
         ConnectionConfig cfg = Get(connectionName);
         string cs = $"Data Source={cfg.Host}:{cfg.Port}/{cfg.Service};User Id={cfg.User};Password={cfg.Password};";
         OracleConnection conn = new(cs);
-        conn.Open();
+
+        try {
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+        } catch {
+            await conn.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
         return conn;
     }
 

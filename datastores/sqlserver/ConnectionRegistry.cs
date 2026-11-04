@@ -42,7 +42,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// <summary>
     /// Opens and returns a new <see cref="SqlConnection"/> for the specified named connection.
     /// </summary>
-    public SqlConnection Open(string? connectionName, string? database = null) {
+    public async Task<SqlConnection> OpenAsync(string? connectionName, string? database, CancellationToken cancellationToken) {
         ConnectionConfig cfg = Get(connectionName);
         string db = !string.IsNullOrWhiteSpace(database) ? database : cfg.Database;
         string cs = new SqlConnectionStringBuilder {
@@ -54,7 +54,14 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             ConnectTimeout = cfg.ConnectTimeoutSeconds,
         }.ConnectionString;
         SqlConnection conn = new(cs);
-        conn.Open();
+
+        try {
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+        } catch {
+            await conn.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
         return conn;
     }
 
