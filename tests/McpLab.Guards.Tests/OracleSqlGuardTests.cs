@@ -57,6 +57,7 @@ internal sealed class OracleSqlGuardTests {
     [TestCase("WITH cte AS (SELECT 1 AS value FROM DUAL) SELECT value FROM cte")]
     [TestCase("SELECT 'DELETE' AS keyword FROM DUAL")]
     [TestCase("SELECT \"UPDATE\" FROM AUDIT_LOG")]
+    [TestCase("SELECT 'FOR UPDATE' AS keyword FROM DUAL")]
     public void ValidateReadOnlyQuery_ReadOnlySql_DoesNotThrow(string sql) {
         Assert.DoesNotThrow(() => OracleSqlGuard.ValidateReadOnlyQuery(sql));
     }
@@ -64,6 +65,8 @@ internal sealed class OracleSqlGuardTests {
     [TestCase("WITH cte AS (SELECT 1 AS id FROM DUAL) DELETE FROM USERS WHERE ID IN (SELECT id FROM cte)")]
     [TestCase("SELECT 1 FROM DUAL; DROP TABLE USERS")]
     [TestCase("BEGIN NULL; END;")]
+    [TestCase("SELECT * FROM USERS WHERE ID = 1 FOR UPDATE")]
+    [TestCase("SELECT * FROM USERS FOR\r\nUPDATE NOWAIT")]
     public void ValidateReadOnlyQuery_WriteOrCommandSql_ThrowsInvalidOperationException(string sql) {
         InvalidOperationException exception =
             Assert.Throws<InvalidOperationException>(() => OracleSqlGuard.ValidateReadOnlyQuery(sql))!;

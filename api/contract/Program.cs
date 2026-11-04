@@ -10,12 +10,16 @@ builder.Services.AddDotEnvSnapshot(dotEnvPath);
 builder.Services.AddSingleton<ConnectionRegistry>();
 builder.Services.AddSingleton<SpecSourceClient>();
 builder.Services.AddHttpClient(ConnectionRegistry.PlainClientKey)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {
+        AllowAutoRedirect = false,
+    })
     .ConfigureHttpClient(c => {
         c.Timeout = TimeSpan.FromSeconds(15);
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     });
 builder.Services.AddHttpClient(ConnectionRegistry.SslSkipClientKey)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {
+        AllowAutoRedirect = false,
         ServerCertificateCustomValidationCallback =
             HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
     })
@@ -34,6 +38,7 @@ builder.Services
     .WithTools<ApiContractTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-api-contract");
 app.MapMcp("/mcp");
 await app.RunAsync();

@@ -25,6 +25,7 @@ builder.Services
     .WithTools<OidcTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-oidc");
 app.MapMcp("/mcp");
 await app.RunAsync();

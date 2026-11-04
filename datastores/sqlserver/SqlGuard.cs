@@ -141,7 +141,7 @@ public static partial class SqlGuard {
     [GeneratedRegex(@"\bUPDATE\b", RegexOptions.IgnoreCase)]
     private static partial Regex UpdateKeywordRegex();
 
-    [GeneratedRegex(@"\b(?:INSERT|UPDATE|DELETE|MERGE|EXEC|EXECUTE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|DENY|BACKUP|RESTORE)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:INSERT|UPDATE|DELETE|MERGE|EXEC|EXECUTE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|DENY|BACKUP|RESTORE|INTO|OPENROWSET|OPENQUERY|OPENDATASOURCE)\b", RegexOptions.IgnoreCase)]
     private static partial Regex ReadOnlyForbiddenKeywordRegex();
 
     [GeneratedRegex(@"N?'(?:''|[^'])*'", RegexOptions.IgnoreCase | RegexOptions.Singleline)]

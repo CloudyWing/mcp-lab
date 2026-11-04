@@ -19,6 +19,7 @@ builder.Services
     .WithTools<MqttTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-mosquitto");
 app.MapMcp("/mcp");
 await app.RunAsync();

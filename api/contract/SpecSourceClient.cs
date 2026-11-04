@@ -4,6 +4,11 @@ namespace CloudyWing.McpLab.ApiContract;
 /// Loads OpenAPI specifications from URL or local container path.
 /// </summary>
 public sealed class SpecSourceClient {
+    /// <summary>
+    /// Maximum OpenAPI spec size read from a URL or file.
+    /// </summary>
+    public const int MaxSpecBytes = 10 * 1024 * 1024;
+
     private readonly ConnectionRegistry registry;
 
     /// <summary>
@@ -19,7 +24,7 @@ public sealed class SpecSourceClient {
     public async Task<OpenApiSpec> LoadSpecAsync(ConnectionConfig cfg) {
         string text = !string.IsNullOrWhiteSpace(cfg.SpecUrl)
             ? await LoadUrlAsync(cfg).ConfigureAwait(false)
-            : await File.ReadAllTextAsync(cfg.SpecPath).ConfigureAwait(false);
+            : await LoadFileAsync(cfg.SpecPath).ConfigureAwait(false);
 
         return OpenApiSpec.Parse(text);
     }
@@ -28,8 +33,13 @@ public sealed class SpecSourceClient {
         using HttpClient http = registry.CreateClient(cfg);
         using HttpRequestMessage request = new(HttpMethod.Get, cfg.SpecUrl);
         ApplyAuthHeader(cfg, request);
-        using HttpResponseMessage response = await http.SendAsync(request).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        using HttpResponseMessage response = await http
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+            .ConfigureAwait(false);
+        (byte[] bytes, bool truncated) = await BoundedHttpContent
+            .ReadAsync(response.Content, MaxSpecBytes)
+            .ConfigureAwait(false);
+        string body = Encoding.UTF8.GetString(bytes);
 
         if (!response.IsSuccessStatusCode) {
             throw new InvalidOperationException(
@@ -37,7 +47,21 @@ public sealed class SpecSourceClient {
             );
         }
 
+        if (truncated) {
+            throw new InvalidOperationException($"OpenAPI spec exceeds {MaxSpecBytes} bytes.");
+        }
+
         return body;
+    }
+
+    private static async Task<string> LoadFileAsync(string path) {
+        FileInfo file = new(path);
+
+        if (file.Exists && file.Length > MaxSpecBytes) {
+            throw new InvalidOperationException($"OpenAPI spec exceeds {MaxSpecBytes} bytes.");
+        }
+
+        return await File.ReadAllTextAsync(path).ConfigureAwait(false);
     }
 
     private static void ApplyAuthHeader(ConnectionConfig cfg, HttpRequestMessage request) {

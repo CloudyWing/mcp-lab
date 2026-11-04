@@ -38,7 +38,7 @@ MSSQL_CONN_STAGE_USER=sa
 MSSQL_CONN_STAGE_PASSWORD=pw2
 ```
 
-Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="staging"` 指定目標。未指定時自動使用第一個已設定的連線。
+Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="staging"` 指定目標。讀取類工具未指定時使用第一個已設定的連線；寫入類工具（如 `execute`、`set_key`、`delete_by_query`、`publish`）必須明確指定 `connection`，否則回傳 `blocked`。
 
 | 服務 | 環境變數前綴 | 必填欄位 |
 | --- | --- | --- |
@@ -59,6 +59,34 @@ cp .env.example .env
 # 填入至少一個連線設定
 docker compose up -d --build
 docker compose ps
+```
+
+`mcp-docker` 需要掛載 Docker socket，預設不啟動。需要時以 profile 啟動：
+
+```bash
+docker compose --profile docker up -d --build
+```
+
+## 存取控制
+
+所有 MCP 服務的對外埠預設只綁定 `127.0.0.1`，同一區網的其他主機無法連線。確實需要對外開放時，可設定 `MCP_BIND_ADDRESS`（例如 `0.0.0.0`），修改後需重新建立容器。
+
+若要要求 MCP client 帶 token，設定 `MCPLAB_MCP_TOKEN`。設定後除了 `/health` 以外的請求都必須帶 `Authorization: Bearer <token>`，否則回傳 HTTP 401。此設定會熱重載，修改 `.env` 後不需重啟容器；留空則不檢查。
+
+```env
+MCPLAB_MCP_TOKEN=<隨機產生的長字串>
+```
+
+MCP client 設定範例（HTTP transport）：
+
+```json
+{
+  "type": "http",
+  "url": "http://127.0.0.1:9800/mcp",
+  "headers": {
+    "Authorization": "Bearer <MCPLAB_MCP_TOKEN>"
+  }
+}
 ```
 
 ## 設定熱重載
@@ -126,8 +154,12 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | SQL Server | `MSSQL_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
 | Oracle | `ORACLE_QUERY_TIMEOUT` / `QUERY_TIMEOUT` | 60 秒 | 300 秒 |
 | Oracle | `ORACLE_MAX_ROWS` / `MAX_ROWS` | 500 | 5000 |
+| SQL Server | `MSSQL_MAX_CELL_CHARS` | 4000 | 100000 |
+| Oracle | `ORACLE_MAX_CELL_CHARS` | 4000 | 100000 |
 | Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
 | Redis | `REDIS_MAX_ROWS` / `MAX_ROWS` | 100 | 1000 |
+
+`*_MAX_CELL_CHARS` 限制單一欄位回傳的字元數，超過的部分會截斷並標示原始長度。Redis 的 `get_key` 讀取 list、set、sorted set、hash 時，最多回傳 `REDIS_MAX_ROWS` 筆，並回傳 `total_count` 與 `truncated`。
 
 可用 `list_runtime_limits()` 查詢 SQL Server、Oracle、Elasticsearch、Redis 與 Reader 目前生效的限制值。
 
@@ -283,7 +315,15 @@ stat -c "%g" /var/run/docker.sock
 | DELETE/UPDATE 需 WHERE | 無條件刪除或更新一律拒絕 |
 | 拒絕無效 WHERE | `WHERE 1=1`、`WHERE TRUE` 等繞過條件一律拒絕 |
 
-`query` 工具僅允許唯讀 `SELECT / WITH` 查詢。
+`query` 工具僅允許唯讀 `SELECT / WITH` 查詢，並拒絕 `SELECT ... INTO`、`OPENROWSET`、`OPENQUERY`、`OPENDATASOURCE`（SQL Server）與 `FOR UPDATE`（Oracle）等會產生副作用的語法。
+
+## Elasticsearch 刪除防護
+
+`delete_by_query` 必須提供非空的 `query` 物件，且查詢中任何位置都不能出現 `match_all`。目標索引必須是單一索引，不接受 `*`、逗號分隔清單、`_all` 或 `-` 開頭的名稱。
+
+## API Contract 呼叫限制
+
+`invoke_endpoint` 與 spec 下載不會自動跟隨 HTTP 重導向，避免 auth header 被送到其他位置；遇到 3xx 時會回傳 status code 與 `redirect_location`。回應以串流方式讀取，超過 `maxBodyBytes` 的部分不會讀入記憶體；spec 上限為 10 MB。
 
 ## Base64 工具（避免字元清洗）
 

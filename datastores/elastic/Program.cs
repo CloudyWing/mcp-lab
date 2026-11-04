@@ -28,6 +28,7 @@ builder.Services
     .WithTools<ElasticTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-elasticsearch");
 app.MapMcp("/mcp");
 await app.RunAsync();

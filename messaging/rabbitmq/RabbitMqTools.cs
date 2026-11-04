@@ -187,8 +187,12 @@ public sealed class RabbitMqTools {
         [Description("Routing key")] string routingKey,
         [Description("訊息內容")] string message,
         [Description("Virtual host，預設 /")] string vhost = "/",
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             using HttpClient http = registry.CreateClient(connection);
 
@@ -203,13 +207,29 @@ public sealed class RabbitMqTools {
             HttpResponseMessage resp = await http.PostAsync(url,
                 new StringContent(payload, Encoding.UTF8, "application/json"));
             resp.EnsureSuccessStatusCode();
-
-            return ToolResponse.Ok(new {
+            bool routed = IsRouted(await resp.Content.ReadAsStringAsync());
+            object data = new {
                 exchange,
                 routing_key = routingKey,
-            }, "Message published.");
+                routed,
+            };
+
+            return routed
+                ? ToolResponse.Ok(data, "Message published.")
+                : ToolResponse.Error("Message was not routed to any queue. Check the exchange bindings and routing key.", data);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
+        }
+    }
+
+    /// <summary>
+    /// Reads the <c>routed</c> flag from a Management API publish response.
+    /// </summary>
+    public static bool IsRouted(string responseBody) {
+        try {
+            return JsonNode.Parse(responseBody)?["routed"]?.GetValue<bool>() ?? false;
+        } catch (Exception ex) when (ex is JsonException or InvalidOperationException) {
+            return false;
         }
     }
 }

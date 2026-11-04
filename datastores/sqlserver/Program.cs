@@ -19,6 +19,7 @@ builder.Services
     .WithTools<SqlServerTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-sql-server");
 app.MapMcp("/mcp");
 await app.RunAsync();

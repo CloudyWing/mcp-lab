@@ -1,6 +1,8 @@
 services:
   mcp-docker:
     container_name: mcp-docker
+    profiles:
+      - docker
     build:
       context: ../..
       dockerfile: system/docker/Dockerfile
@@ -24,7 +26,7 @@ services:
         source: ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
         target: /var/run/docker.sock
     ports:
-      - "${MCP_DOCKER_PORT:-9860}:8080"
+      - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_DOCKER_PORT:-9860}:8080"
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
       interval: 10s

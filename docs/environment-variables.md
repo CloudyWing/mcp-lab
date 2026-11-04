@@ -10,7 +10,9 @@
 | `DOCUMENT_MAX_IMAGES`、`DOCUMENT_MAX_TEXT_MB`、`DOCUMENT_LIST_*`、`DOCUMENT_SEARCH_*`、`DOCUMENT_XLSX_*` | runtime | Reader 文件讀取、列舉、搜尋與 XLSX 解析限制 |
 | `DOCUMENT_HOST_MOUNT_ROOT`、`DOCUMENT_HOST_MOUNT_SOURCE` | build-time | Reader host 路徑根與 Docker volume 掛載來源；修改後需重建或重啟 Compose service |
 | `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `.env` |
-| `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port、Compose project 與容器時區 |
+| `MCPLAB_MCP_TOKEN` | runtime | MCP endpoint 的 Bearer token；留空則不檢查 |
+| `*_MAX_CELL_CHARS` | runtime | SQL Server 與 Oracle 單一欄位回傳字元上限 |
+| `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
 | `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
 | `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
 
@@ -39,7 +41,14 @@ runtime 變數由容器內服務監聽 `/app/.env` 後套用；build-time 變數
 | `MCP_RABBITMQ_PORT` | `9821` |  |
 | `MCP_MAILPIT_PORT` | `9830` |  |
 | `MCP_READER_PORT` | `9840` |  |
-| `MCP_DOCKER_PORT` | `9860` |  |
+| `MCP_DOCKER_PORT` | `9860` | 僅在 `--profile docker` 啟動 |
+| `MCP_BIND_ADDRESS` | `127.0.0.1` | 所有 MCP 對外埠的綁定位址；改為 `0.0.0.0` 會對所有網路介面開放 |
+
+## 存取控制
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `MCPLAB_MCP_TOKEN` | `` | 設定後，`/health` 以外的請求必須帶 `Authorization: Bearer <token>` |
 
 ## Docker / Compose 服務
 
@@ -60,6 +69,8 @@ runtime 變數由容器內服務監聽 `/app/.env` 後套用；build-time 變數
 | `MAX_ROWS` | `` | 舊版相容用的回傳筆數後備值，建議改用服務專屬變數 |
 | `MSSQL_MAX_ROWS` | `500` | SQL Server 查詢最大回傳列數，允許 1 到 5000 |
 | `ORACLE_MAX_ROWS` | `500` | Oracle 查詢最大回傳列數，允許 1 到 5000 |
+| `MSSQL_MAX_CELL_CHARS` | `4000` | SQL Server 單一欄位回傳字元上限，允許 1 到 100000 |
+| `ORACLE_MAX_CELL_CHARS` | `4000` | Oracle 單一欄位回傳字元上限，允許 1 到 100000 |
 | `ES_SEARCH_SIZE` | `10` | Elasticsearch 搜尋預設回傳筆數，允許 1 到 1000 |
 
 ## 本機整合測試

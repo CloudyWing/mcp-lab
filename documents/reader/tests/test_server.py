@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import sys
 import tempfile
@@ -179,3 +180,69 @@ class ReaderServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_parse_text_reads_only_configured_bytes(self):
+        server._SNAPSHOT.update({"DOCUMENT_MAX_TEXT_MB": "0.001"})
+        file_path = self.root / "big.txt"
+        file_path.write_bytes(b"a" * 5000)
+        original_read_bytes = Path.read_bytes
+
+        def fail_read_bytes(path_self):
+            raise AssertionError("read_bytes must not load the whole file when a limit is set")
+
+        Path.read_bytes = fail_read_bytes
+        try:
+            result = server._parse_text(file_path)
+        finally:
+            Path.read_bytes = original_read_bytes
+
+        self.assertTrue(result["truncated"])
+        self.assertEqual(len(result["content"]), int(0.001 * 1024 * 1024))
+
+
+class AccessTokenTests(unittest.TestCase):
+    def tearDown(self):
+        server._SNAPSHOT.update({})
+
+    def test_is_authorized_accepts_matching_bearer_token(self):
+        self.assertTrue(server._is_authorized("Bearer secret", "secret"))
+        self.assertTrue(server._is_authorized("bearer  secret ", "secret"))
+
+    def test_is_authorized_rejects_missing_or_wrong_token(self):
+        self.assertFalse(server._is_authorized(None, "secret"))
+        self.assertFalse(server._is_authorized("Bearer other", "secret"))
+        self.assertFalse(server._is_authorized("Basic secret", "secret"))
+        self.assertFalse(server._is_authorized("Bearer secret", ""))
+
+    def _call(self, path, headers):
+        calls = []
+        sent = []
+
+        async def app(scope, receive, send):
+            calls.append(scope["path"])
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = server.AccessTokenMiddleware(app)
+        scope = {"type": "http", "path": path, "headers": headers}
+        asyncio.run(middleware(scope, None, send))
+        return calls, sent
+
+    def test_middleware_passes_through_when_token_not_configured(self):
+        calls, sent = self._call("/mcp", [])
+        self.assertEqual(calls, ["/mcp"])
+        self.assertEqual(sent, [])
+
+    def test_middleware_rejects_request_without_token(self):
+        server._SNAPSHOT.update({"MCPLAB_MCP_TOKEN": "secret"})
+        calls, sent = self._call("/mcp", [])
+        self.assertEqual(calls, [])
+        self.assertEqual(sent[0]["status"], 401)
+
+    def test_middleware_allows_request_with_token_and_health_without_token(self):
+        server._SNAPSHOT.update({"MCPLAB_MCP_TOKEN": "secret"})
+        calls, _ = self._call("/mcp", [(b"authorization", b"Bearer secret")])
+        health_calls, _ = self._call("/health", [])
+        self.assertEqual(calls, ["/mcp"])
+        self.assertEqual(health_calls, ["/health"])

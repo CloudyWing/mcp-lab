@@ -36,6 +36,15 @@ public sealed class SqlServerTools {
             MaxQueryTimeoutSeconds
         );
 
+    private int MaxCellChars =>
+        ToolRuntimeOptions.GetSnapshotInt32(
+            snapshotProvider.Current,
+            ["MSSQL_MAX_CELL_CHARS"],
+            SqlResultSetReader.DefaultMaxCellChars,
+            1,
+            SqlResultSetReader.MaxCellCharsLimit
+        );
+
     private int MaxRows =>
         ToolRuntimeOptions.GetSnapshotInt32(
             snapshotProvider.Current,
@@ -68,6 +77,7 @@ public sealed class SqlServerTools {
         ToolResponse.Ok(new {
             query_timeout = QueryTimeout,
             max_rows = MaxRows,
+            max_cell_chars = MaxCellChars,
         });
 
     /// <summary>
@@ -268,7 +278,7 @@ public sealed class SqlServerTools {
     public string Execute(
         [Description("SQL 語句")] string sql,
         [Description("資料庫名稱")] string database = "master",
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         return RunExecute(sql, database, connection);
     }
@@ -283,7 +293,7 @@ public sealed class SqlServerTools {
     public string ExecuteBase64(
         [Description("Base64 編碼的 SQL")] string sqlBase64,
         [Description("資料庫名稱")] string database = "master",
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             sqlBase64,
@@ -299,6 +309,10 @@ public sealed class SqlServerTools {
     }
 
     private string RunExecute(string sql, string database, string connection) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             SqlGuard.Validate(sql);
             using SqlConnection conn = registry.Open(connection, database);
@@ -324,28 +338,5 @@ public sealed class SqlServerTools {
         }
     }
 
-    private object ReadResultSet(SqlDataReader rdr) {
-        int max = MaxRows;
-        string[] cols = Enumerable.Range(0, rdr.FieldCount).Select(i => rdr.GetName(i)).ToArray();
-        List<IReadOnlyList<string>> rows = [];
-
-        int count = 0;
-
-        while (rdr.Read() && count < max) {
-            rows.Add(
-                Enumerable.Range(0, rdr.FieldCount)
-                    .Select(i => rdr.IsDBNull(i) ? "NULL" : rdr[i]?.ToString() ?? "")
-                    .ToArray()
-            );
-            count++;
-        }
-
-        return new {
-            columns = cols,
-            rows,
-            returned_count = rows.Count,
-            truncated = count == max,
-            max_rows = max,
-        };
-    }
+    private object ReadResultSet(SqlDataReader rdr) => SqlResultSetReader.Read(rdr, MaxRows, MaxCellChars);
 }

@@ -235,7 +235,7 @@ public sealed class ElasticTools {
         [Description("索引名稱")] string index,
         [Description("JSON 格式的文件內容")] string document,
         [Description("文件 ID，省略則自動產生")] string id = "",
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         return await RunIndexDocument(index, document, id, connection);
     }
@@ -250,7 +250,7 @@ public sealed class ElasticTools {
         [Description("索引名稱")] string index,
         [Description("Base64 編碼的 JSON 文件內容")] string documentBase64,
         [Description("文件 ID，省略則自動產生")] string id = "",
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             documentBase64,
@@ -266,6 +266,10 @@ public sealed class ElasticTools {
     }
 
     private async Task<string> RunIndexDocument(string index, string document, string id, string connection) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             JsonNode.Parse(document); // validate JSON
             using HttpClient http = registry.CreateClient(connection);
@@ -299,8 +303,12 @@ public sealed class ElasticTools {
     public async Task<string> DeleteDocument(
         [Description("索引名稱")] string index,
         [Description("文件 ID")] string id,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             using HttpClient http = registry.CreateClient(connection);
             HttpResponseMessage resp = await http.DeleteAsync(
@@ -327,7 +335,7 @@ public sealed class ElasticTools {
     public async Task<string> DeleteByQuery(
         [Description("索引名稱")] string index,
         [Description("JSON 查詢條件，必須包含具體 query（不可 match_all）")] string queryBody,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         return await RunDeleteByQuery(index, queryBody, connection);
     }
@@ -341,7 +349,7 @@ public sealed class ElasticTools {
     public async Task<string> DeleteByQueryBase64(
         [Description("索引名稱")] string index,
         [Description("Base64 編碼的 JSON 查詢條件")] string queryBodyBase64,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             queryBodyBase64,
@@ -357,7 +365,12 @@ public sealed class ElasticTools {
     }
 
     private async Task<string> RunDeleteByQuery(string index, string queryBody, string connection) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
+            ElasticGuard.ValidateSingleIndex(index, "DeleteByQuery");
             ElasticGuard.ValidateQueryBody(queryBody, "DeleteByQuery");
             using HttpClient http = registry.CreateClient(connection);
             HttpResponseMessage resp = await http.PostAsync(

@@ -20,6 +20,7 @@ builder.Services
     .WithTools<RedisTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-redis");
 app.MapMcp("/mcp");
 await app.RunAsync();

@@ -21,6 +21,7 @@ builder.Services
     .WithTools<MailpitTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-mailpit");
 app.MapMcp("/mcp");
 await app.RunAsync();

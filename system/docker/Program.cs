@@ -19,6 +19,7 @@ builder.Services
     .WithTools<DockerTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-docker");
 app.MapMcp("/mcp");
 await app.RunAsync();

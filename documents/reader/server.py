@@ -5,6 +5,7 @@ mcp-reader — Document & image reader MCP server.
 
 import base64
 import chardet
+import hmac
 import json
 import os
 import re
@@ -475,7 +476,11 @@ def _parse_text(path: Path) -> dict:
     max_bytes  = int(max_text_mb * 1024 * 1024) if max_text_mb > 0 else 0
     truncated  = max_bytes > 0 and size_bytes > max_bytes
 
-    raw = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if max_bytes <= 0:
+        raw = path.read_bytes()
+    else:
+        with path.open("rb") as file:
+            raw = file.read(max_bytes)
     detected = chardet.detect(raw)
     encoding = detected.get("encoding") or "utf-8"
     try:
@@ -739,6 +744,55 @@ def search_documents(
     return response
 
 
+MCP_TOKEN_VARIABLE = "MCPLAB_MCP_TOKEN"
+
+
+def _expected_access_token() -> str:
+    return (_SNAPSHOT.get_first([MCP_TOKEN_VARIABLE]) or "").strip()
+
+
+def _is_authorized(authorization_header: str | None, expected: str) -> bool:
+    scheme = "bearer "
+    if not expected or not authorization_header or not authorization_header.lower().startswith(scheme):
+        return False
+    actual = authorization_header[len(scheme):].strip()
+    return hmac.compare_digest(actual.encode("utf-8"), expected.encode("utf-8"))
+
+
+class AccessTokenMiddleware:
+    """當設定 MCPLAB_MCP_TOKEN 時，要求 /health 以外的 HTTP 請求帶上 Bearer token。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and not scope.get("path", "").startswith("/health"):
+            expected = _expected_access_token()
+            headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope.get("headers", [])}
+            if expected and not _is_authorized(headers.get("authorization"), expected):
+                body = json.dumps({
+                    "error": "unauthorized",
+                    "message": f"Missing or invalid bearer token. Set the Authorization header to match {MCP_TOKEN_VARIABLE}.",
+                }).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
 if __name__ == "__main__":
+    import uvicorn
+
     _WATCHER.start()
-    mcp.run(transport="streamable-http")
+    uvicorn.run(
+        AccessTokenMiddleware(mcp.streamable_http_app()),
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+    )

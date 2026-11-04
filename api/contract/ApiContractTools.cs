@@ -192,10 +192,13 @@ public sealed class ApiContractTools {
                 request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
             }
 
-            using HttpResponseMessage response = await http.SendAsync(request).ConfigureAwait(false);
-            byte[] bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-            bool truncated = bytes.Length > safeMaxBodyBytes;
-            string body = Encoding.UTF8.GetString(bytes.AsSpan(0, Math.Min(bytes.Length, safeMaxBodyBytes)));
+            using HttpResponseMessage response = await http
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+                .ConfigureAwait(false);
+            (byte[] bytes, bool truncated) = await BoundedHttpContent
+                .ReadAsync(response.Content, safeMaxBodyBytes)
+                .ConfigureAwait(false);
+            string body = Encoding.UTF8.GetString(bytes);
 
             return ToolResponse.Ok(new {
                 url = url.ToString(),
@@ -203,6 +206,7 @@ public sealed class ApiContractTools {
                 status_code = (int)response.StatusCode,
                 status_defined_in_spec = IsStatusDefined(spec, path, normalizedMethod, (int)response.StatusCode),
                 content_type = response.Content.Headers.ContentType?.MediaType ?? "",
+                redirect_location = response.Headers.Location?.ToString(),
                 body_truncated = truncated,
                 body,
             });

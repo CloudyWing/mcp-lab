@@ -38,6 +38,8 @@ EXPECTED_SERVICES = [
     "mcp-reader",
     "mcp-docker",
 ]
+# Started only with `docker compose --profile docker up`; skipped when absent.
+OPTIONAL_SERVICES = {"mcp-docker"}
 
 
 class SmokeError(Exception):
@@ -135,6 +137,10 @@ class McpClient:
             "Mcp-Protocol-Version": PROTOCOL_VERSION,
         }
 
+        token = read_setting("MCPLAB_MCP_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
         if include_session:
             if not self.session_id:
                 raise SmokeError("MCP session has not been initialized.")
@@ -205,8 +211,19 @@ def main() -> int:
 
     runner = Runner()
     status_by_service = load_compose_status()
+    global EXPECTED_SERVICES
+    EXPECTED_SERVICES = [
+        service
+        for service in EXPECTED_SERVICES
+        if service not in OPTIONAL_SERVICES or service in status_by_service
+    ]
 
     runner.check("compose services are running and healthy", lambda: check_compose_health(status_by_service))
+    runner.check("MCP ports bind to loopback by default", lambda: check_loopback_ports(status_by_service))
+    runner.check(
+        "MCP endpoints enforce MCPLAB_MCP_TOKEN when configured",
+        lambda: check_access_token(status_by_service, args.timeout_seconds),
+    )
     runner.check("container security policy is enforced", check_container_security)
     runner.check("HTTP health endpoints are available", lambda: check_health_endpoints(status_by_service))
     runner.check(
@@ -301,6 +318,42 @@ def check_compose_health(status_by_service: dict[str, dict[str, Any]]) -> None:
 
     if unhealthy:
         raise SmokeError("; ".join(unhealthy))
+
+
+def check_loopback_ports(status_by_service: dict[str, dict[str, Any]]) -> None:
+    bind_address = read_setting("MCP_BIND_ADDRESS") or "127.0.0.1"
+    exposed: list[str] = []
+
+    for service in EXPECTED_SERVICES:
+        for publisher in status_by_service[service].get("Publishers") or []:
+            if publisher.get("TargetPort") == 8080 and publisher.get("PublishedPort"):
+                if publisher.get("URL") != bind_address:
+                    exposed.append(f"{service} -> {publisher.get('URL')}:{publisher.get('PublishedPort')}")
+
+    if exposed:
+        raise SmokeError(f"Expected ports bound to {bind_address}: " + "; ".join(exposed))
+
+
+def check_access_token(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    if not read_setting("MCPLAB_MCP_TOKEN"):
+        raise SkipCheck("MCPLAB_MCP_TOKEN is not set")
+
+    url = service_url(status_by_service, "mcp-sql-server")
+    request = urllib.request.Request(
+        url,
+        data=b"{}",
+        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+        method="POST",
+    )
+
+    try:
+        urllib.request.urlopen(request, timeout=timeout_seconds)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return
+        raise SmokeError(f"Expected HTTP 401 without a token, got {exc.code}") from exc
+
+    raise SmokeError("Request without a token was accepted.")
 
 
 def check_container_security() -> None:
@@ -466,20 +519,40 @@ def check_write_tool_guards(
     include_oracle: bool,
 ) -> None:
     sql_server = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
-    expect_tool_kind(sql_server.call_tool("execute", {"sql": "DROP TABLE dbo.SmokeTest"}), "blocked")
+    sql_connection = first_connection_name(sql_server)
+    expect_tool_kind(sql_server.call_tool("execute", {"sql": "UPDATE dbo.SmokeTest SET Id = 1 WHERE Id = 2"}), "blocked")
+    expect_tool_kind(
+        sql_server.call_tool("execute", {"sql": "DROP TABLE dbo.SmokeTest", "connection": sql_connection}),
+        "blocked",
+    )
+    expect_tool_kind(sql_server.call_tool("query", {"sql": "SELECT * INTO dbo.SmokeCopy FROM sys.objects"}), "blocked")
 
     redis = create_client(status_by_service, "mcp-redis", timeout_seconds)
-    expect_tool_kind(redis.call_tool("delete_keys", {"keys": ""}), "error")
-    expect_tool_kind(redis.call_tool("set_key_ttl", {"key": "smoke-missing", "ttlSeconds": 0}), "error")
+    redis_connection = first_connection_name(redis)
+    expect_tool_kind(redis.call_tool("delete_keys", {"keys": "smoke-missing"}), "blocked")
+    expect_tool_kind(redis.call_tool("delete_keys", {"keys": "", "connection": redis_connection}), "error")
+    expect_tool_kind(
+        redis.call_tool("set_key_ttl", {"key": "smoke-missing", "ttlSeconds": 0, "connection": redis_connection}),
+        "error",
+    )
 
     elasticsearch = create_client(status_by_service, "mcp-elasticsearch", timeout_seconds)
+    es_connection = first_connection_name(elasticsearch)
+    for query_body in (
+        "{\"query\":{\"match_all\":{}}}",
+        "{\"query\":{\"bool\":{\"must\":{\"match_all\":{}}}}}",
+    ):
+        expect_tool_kind(
+            elasticsearch.call_tool(
+                "delete_by_query",
+                {"index": "smoke-test", "queryBody": query_body, "connection": es_connection},
+            ),
+            "blocked",
+        )
     expect_tool_kind(
         elasticsearch.call_tool(
             "delete_by_query",
-            {
-                "index": "smoke-test",
-                "queryBody": "{\"query\":{\"match_all\":{}}}",
-            },
+            {"index": "smoke-*", "queryBody": "{\"query\":{\"term\":{\"id\":1}}}", "connection": es_connection},
         ),
         "blocked",
     )
@@ -489,6 +562,7 @@ def check_write_tool_guards(
             {
                 "index": "smoke-test",
                 "document": "{",
+                "connection": es_connection,
             },
         ),
         "error",
@@ -496,7 +570,19 @@ def check_write_tool_guards(
 
     if include_oracle:
         oracle = create_client(status_by_service, "mcp-oracle", timeout_seconds)
-        expect_tool_kind(oracle.call_tool("execute", {"sql": "DROP TABLE SmokeTest"}), "blocked")
+        expect_tool_kind(
+            oracle.call_tool("execute", {"sql": "DROP TABLE SmokeTest", "connection": first_connection_name(oracle)}),
+            "blocked",
+        )
+
+
+def first_connection_name(client: McpClient) -> str:
+    response = expect_tool_ok(client.call_tool("list_connections"))
+    connections = response.get("data") or []
+    if not connections:
+        raise SmokeError(f"{client.url} has no configured connections.")
+
+    return str(connections[0]["name"])
 
 
 def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
@@ -529,6 +615,9 @@ def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: 
 
 
 def check_docker_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    if "mcp-docker" not in status_by_service:
+        raise SkipCheck("mcp-docker is not running; start it with `docker compose --profile docker up -d`")
+
     client = create_client(status_by_service, "mcp-docker", timeout_seconds)
     expect_tool_ok(client.call_tool("ping_docker"))
 
@@ -729,6 +818,19 @@ def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
         raise SmokeError(f"`{' '.join(args)}` failed: {output}")
 
     return completed
+
+
+def read_setting(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        env_path = REPO_ROOT / ".env"
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                key, separator, raw = line.partition("=")
+                if separator and key.strip() == name:
+                    value = raw.strip().strip('"').strip("'")
+
+    return (value or "").strip()
 
 
 def is_truthy(value: str | None) -> bool:

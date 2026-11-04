@@ -58,6 +58,8 @@ internal sealed class SqlServerSqlGuardTests {
     [TestCase("WITH cte AS (SELECT 1 AS value) SELECT value FROM cte")]
     [TestCase("SELECT 'DELETE' AS keyword")]
     [TestCase("SELECT [UPDATE] FROM dbo.AuditLog")]
+    [TestCase("SELECT 'INTO' AS keyword")]
+    [TestCase("SELECT [INTO] FROM dbo.AuditLog")]
     public void ValidateReadOnlyQuery_ReadOnlySql_DoesNotThrow(string sql) {
         Assert.DoesNotThrow(() => SqlServerSqlGuard.ValidateReadOnlyQuery(sql));
     }
@@ -65,6 +67,11 @@ internal sealed class SqlServerSqlGuardTests {
     [TestCase("WITH cte AS (SELECT 1 AS id) DELETE FROM dbo.Users WHERE Id IN (SELECT id FROM cte)")]
     [TestCase("SELECT 1; DROP TABLE dbo.Users")]
     [TestCase("EXEC dbo.RebuildIndex")]
+    [TestCase("SELECT * INTO dbo.UsersCopy FROM dbo.Users")]
+    [TestCase("SELECT Id\r\nINTO #Temp\r\nFROM dbo.Users")]
+    [TestCase("SELECT * FROM OPENQUERY(LinkedServer, 'SELECT 1')")]
+    [TestCase("SELECT * FROM OPENROWSET('SQLNCLI', 'Server=remote;Trusted_Connection=yes;', 'SELECT 1')")]
+    [TestCase("SELECT * FROM OPENDATASOURCE('SQLNCLI', 'Data Source=remote').master.dbo.sysobjects")]
     public void ValidateReadOnlyQuery_WriteOrCommandSql_ThrowsInvalidOperationException(string sql) {
         InvalidOperationException exception =
             Assert.Throws<InvalidOperationException>(() => SqlServerSqlGuard.ValidateReadOnlyQuery(sql))!;

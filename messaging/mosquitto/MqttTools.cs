@@ -73,16 +73,20 @@ public sealed class MqttTools {
         [Description("訊息內容")] string message,
         [Description("QoS 等級（0/1/2）")] int qos = 0,
         [Description("是否保留訊息")] bool retain = false,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
+        if (qos is < 0 or > 2) {
+            return ToolResponse.Error($"QoS must be 0, 1, or 2 (got {qos}).");
+        }
+
         try {
             IMqttClient client = await registry.ConnectAsync(connection);
 
-            MqttQualityOfServiceLevel mqttQos = qos switch {
-                1 => MqttQualityOfServiceLevel.AtLeastOnce,
-                2 => MqttQualityOfServiceLevel.ExactlyOnce,
-                _ => MqttQualityOfServiceLevel.AtMostOnce,
-            };
+            MqttQualityOfServiceLevel mqttQos = (MqttQualityOfServiceLevel)qos;
 
             MqttApplicationMessage msg = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)

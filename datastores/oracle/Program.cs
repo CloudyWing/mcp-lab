@@ -19,6 +19,7 @@ builder.Services
     .WithTools<OracleTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-oracle");
 app.MapMcp("/mcp");
 await app.RunAsync();

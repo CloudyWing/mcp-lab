@@ -21,6 +21,7 @@ builder.Services
     .WithTools<RabbitMqTools>();
 
 WebApplication app = builder.Build();
+app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-rabbitmq");
 app.MapMcp("/mcp");
 await app.RunAsync();

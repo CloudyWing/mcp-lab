@@ -53,7 +53,7 @@ public sealed class RedisTools {
         [Description("連線名稱，省略則使用第一個")] string connection = ""
     ) {
         try {
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             TimeSpan latency = await db.PingAsync();
 
@@ -76,7 +76,7 @@ public sealed class RedisTools {
     ) {
         try {
             int safeCount = limits.NormalizeKeyCount(count);
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IServer server = mux.GetServers().First();
             List<string> keys = [];
 
@@ -104,36 +104,40 @@ public sealed class RedisTools {
         [Description("Redis key 名稱")] string key,
         [Description("連線名稱")] string connection = "") {
         try {
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             RedisType type = await db.KeyTypeAsync(key);
+            int max = limits.KeyCount;
 
-            object result = type switch {
-                RedisType.String =>
-                    (await db.StringGetAsync(key)).ToString() ?? "(nil)",
-                RedisType.List =>
-                    (await db.ListRangeAsync(key)).Select(v => v.ToString()).ToArray(),
-                RedisType.Set =>
-                    (await db.SetMembersAsync(key)).Select(v => v.ToString()).ToArray(),
-                RedisType.SortedSet =>
-                    (await db.SortedSetRangeByScoreWithScoresAsync(key))
-                        .Select(e => new { member = e.Element.ToString(), score = e.Score })
-                        .ToArray(),
-                RedisType.Hash
-                    => (await db.HashGetAllAsync(key))
-                        .ToDictionary(e => e.Name.ToString(), e => e.Value.ToString()),
-                RedisType.None => "Key does not exist.",
-                _ => $"Unknown type: {type}",
-            };
-            mux.Dispose();
+            if (type == RedisType.None) {
+                return ToolResponse.Empty("Key does not exist.");
+            }
 
-            return type == RedisType.None
-                ? ToolResponse.Empty("Key does not exist.")
-                : ToolResponse.Ok(new {
+            if (type == RedisType.String) {
+                return ToolResponse.Ok(new {
                     key,
-                    type = type.ToString().ToLowerInvariant(),
-                    value = result,
+                    type = "string",
+                    value = (await db.StringGetAsync(key)).ToString() ?? "(nil)",
                 });
+            }
+
+            (object value, long total, int returned) = type switch {
+                RedisType.List => await ReadListAsync(db, key, max),
+                RedisType.Set => await ReadSetAsync(db, key, max),
+                RedisType.SortedSet => await ReadSortedSetAsync(db, key, max),
+                RedisType.Hash => await ReadHashAsync(db, key, max),
+                _ => ((object)$"Unknown type: {type}", 0L, 0),
+            };
+
+            return ToolResponse.Ok(new {
+                key,
+                type = type.ToString().ToLowerInvariant(),
+                value,
+                total_count = total,
+                returned_count = returned,
+                truncated = total > returned,
+                max_items = max,
+            });
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -148,7 +152,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             RedisType keyType = await db.KeyTypeAsync(key);
 
@@ -170,7 +174,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             TimeSpan? ttl = await db.KeyTimeToLiveAsync(key);
 
@@ -197,7 +201,7 @@ public sealed class RedisTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IServer server = mux.GetServers().First();
             IGrouping<string, KeyValuePair<string, string>>[] info = await server.InfoAsync(section);
 
@@ -218,14 +222,18 @@ public sealed class RedisTools {
         [Description("Redis key 名稱")] string key,
         [Description("要儲存的值")] string value,
         [Description("TTL 秒數，0 表示永不過期，負數不允許")] int ttlSeconds = 0,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             if (!limits.IsSetKeyTtlValid(ttlSeconds)) {
                 return ToolResponse.Error("TTL seconds must be zero or greater.");
             }
 
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
 
             if (ttlSeconds > 0) {
@@ -249,8 +257,12 @@ public sealed class RedisTools {
     [McpServerTool, Description("刪除一個或多個 key（以逗號分隔）")]
     public async Task<string> DeleteKeys(
         [Description("key 名稱，多個以逗號分隔")] string keys,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             RedisKey[] keyList = keys
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -261,7 +273,7 @@ public sealed class RedisTools {
                 return ToolResponse.Error("At least one key is required.");
             }
 
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             long deleted = await db.KeyDeleteAsync(keyList);
 
@@ -280,14 +292,18 @@ public sealed class RedisTools {
     public async Task<string> SetKeyTtl(
         [Description("Redis key 名稱")] string key,
         [Description("TTL 秒數，必須大於 0")] int ttlSeconds,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             if (!limits.IsExpireTtlValid(ttlSeconds)) {
                 return ToolResponse.Error("TTL seconds must be greater than zero.");
             }
 
-            using IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
+            IConnectionMultiplexer mux = await registry.ConnectAsync(connection);
             IDatabase db = mux.GetDatabase();
             bool ok = await db.KeyExpireAsync(key, TimeSpan.FromSeconds(ttlSeconds));
 
@@ -300,5 +316,51 @@ public sealed class RedisTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    private static async Task<(object Value, long Total, int Returned)> ReadListAsync(IDatabase db, string key, int max) {
+        RedisValue[] items = await db.ListRangeAsync(key, 0, max - 1);
+        long total = await db.ListLengthAsync(key);
+
+        return (items.Select(v => v.ToString()).ToArray(), total, items.Length);
+    }
+
+    private static async Task<(object Value, long Total, int Returned)> ReadSetAsync(IDatabase db, string key, int max) {
+        List<string> items = [];
+
+        await foreach (RedisValue member in db.SetScanAsync(key, pageSize: max)) {
+            items.Add(member.ToString());
+
+            if (items.Count >= max) {
+                break;
+            }
+        }
+
+        long total = await db.SetLengthAsync(key);
+
+        return (items, total, items.Count);
+    }
+
+    private static async Task<(object Value, long Total, int Returned)> ReadSortedSetAsync(IDatabase db, string key, int max) {
+        SortedSetEntry[] items = await db.SortedSetRangeByRankWithScoresAsync(key, 0, max - 1);
+        long total = await db.SortedSetLengthAsync(key);
+
+        return (items.Select(e => new { member = e.Element.ToString(), score = e.Score }).ToArray(), total, items.Length);
+    }
+
+    private static async Task<(object Value, long Total, int Returned)> ReadHashAsync(IDatabase db, string key, int max) {
+        Dictionary<string, string> items = [];
+
+        await foreach (HashEntry entry in db.HashScanAsync(key, pageSize: max)) {
+            items[entry.Name.ToString()] = entry.Value.ToString();
+
+            if (items.Count >= max) {
+                break;
+            }
+        }
+
+        long total = await db.HashLengthAsync(key);
+
+        return (items, total, items.Count);
     }
 }

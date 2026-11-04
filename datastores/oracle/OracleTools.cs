@@ -36,6 +36,15 @@ public sealed class OracleTools {
             MaxQueryTimeoutSeconds
         );
 
+    private int MaxCellChars =>
+        ToolRuntimeOptions.GetSnapshotInt32(
+            snapshotProvider.Current,
+            ["ORACLE_MAX_CELL_CHARS"],
+            SqlResultSetReader.DefaultMaxCellChars,
+            1,
+            SqlResultSetReader.MaxCellCharsLimit
+        );
+
     private int MaxRows =>
         ToolRuntimeOptions.GetSnapshotInt32(
             snapshotProvider.Current,
@@ -70,6 +79,7 @@ public sealed class OracleTools {
         ToolResponse.Ok(new {
             query_timeout = QueryTimeout,
             max_rows = MaxRows,
+            max_cell_chars = MaxCellChars,
         });
 
     /// <summary>
@@ -247,7 +257,7 @@ public sealed class OracleTools {
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
     public string Execute(
         [Description("SQL 或 PL/SQL 語句")] string sql,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         return RunExecute(sql, connection);
     }
@@ -261,7 +271,7 @@ public sealed class OracleTools {
         "禁止 DROP TABLE、TRUNCATE；DELETE/UPDATE 必須附帶有意義的 WHERE 條件。")]
     public string ExecuteBase64(
         [Description("Base64 編碼的 SQL 或 PL/SQL")] string sqlBase64,
-        [Description("連線名稱")] string connection = ""
+        [Description(WriteConnectionGuard.ParameterDescription)] string connection = ""
     ) {
         if (!Base64Payload.TryDecodeUtf8(
             sqlBase64,
@@ -277,6 +287,10 @@ public sealed class OracleTools {
     }
 
     private string RunExecute(string sql, string connection) {
+        if (WriteConnectionGuard.CheckMissing(connection) is string blocked) {
+            return blocked;
+        }
+
         try {
             SqlGuard.Validate(sql);
             using OracleConnection conn = registry.Open(connection);
@@ -300,30 +314,5 @@ public sealed class OracleTools {
         }
     }
 
-    private object ReadResultSet(OracleDataReader rdr) {
-        int max = MaxRows;
-        string[] cols = Enumerable.Range(0, rdr.FieldCount)
-            .Select(i => rdr.GetName(i))
-            .ToArray();
-        List<IReadOnlyList<string>> rows = [];
-
-        int count = 0;
-
-        while (rdr.Read() && count < max) {
-            rows.Add(
-                Enumerable.Range(0, rdr.FieldCount)
-                    .Select(i => rdr.IsDBNull(i) ? "NULL" : rdr[i]?.ToString() ?? "")
-                    .ToArray()
-            );
-            count++;
-        }
-
-        return new {
-            columns = cols,
-            rows,
-            returned_count = rows.Count,
-            truncated = count == max,
-            max_rows = max,
-        };
-    }
+    private object ReadResultSet(OracleDataReader rdr) => SqlResultSetReader.Read(rdr, MaxRows, MaxCellChars);
 }
