@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.Docker;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -21,5 +22,6 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-docker");
+app.MapConfigStatus("mcp-docker");
 app.MapMcp("/mcp");
 await app.RunAsync();

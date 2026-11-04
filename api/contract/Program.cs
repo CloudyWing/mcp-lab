@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.ApiContract;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -40,5 +41,6 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-api-contract");
+app.MapConfigStatus<ConnectionRegistry>("mcp-api-contract");
 app.MapMcp("/mcp");
 await app.RunAsync();

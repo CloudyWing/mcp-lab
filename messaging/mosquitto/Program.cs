@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.Mosquitto;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -21,5 +22,6 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-mosquitto");
+app.MapConfigStatus<ConnectionRegistry>("mcp-mosquitto");
 app.MapMcp("/mcp");
 await app.RunAsync();

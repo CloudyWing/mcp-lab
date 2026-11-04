@@ -570,6 +570,26 @@ def list_runtime_limits() -> dict:
     }
 
 
+def config_status() -> dict:
+    """回傳 Reader 實際載入的設定狀態，格式與 .NET 服務的 /config/status 相同。"""
+    return {
+        "service": "mcp-reader",
+        "config_file": _WATCHER.status(),
+        "connections": None,
+        "ignored_settings": None,
+        "connections_loaded_at": None,
+        "limits": list_runtime_limits(),
+        "schema": None,
+    }
+
+
+@mcp.custom_route("/config/status", methods=["GET"])
+async def _config_status_route(request):
+    from starlette.responses import JSONResponse
+
+    return JSONResponse(config_status())
+
+
 @mcp.tool()
 def list_documents(
     subpath: str = ".",

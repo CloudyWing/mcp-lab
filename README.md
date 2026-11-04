@@ -123,6 +123,24 @@ MCP client 設定範例（HTTP transport）：
 
 `service.env` 變更後通常會在 1 秒內生效。若語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
 
+## 設定狀態
+
+每個 MCP 服務提供 `GET /config/status`，回報服務實際載入的設定，不含任何設定值（密碼、token 只會以變數名稱出現）：
+
+| 欄位 | 說明 |
+| --- | --- |
+| `config_file` | 設定檔路徑、是否存在、最後載入時間與語法錯誤；有錯誤時服務繼續使用前一份設定 |
+| `connections` | 每個連線的 Alias、名稱與狀態：`loaded`、`rejected`、`rejected_using_previous`（設定有誤，沿用前一版），以及原因 |
+| `ignored_settings` | 被忽略的變數與原因，例如打錯的欄位名稱或不合法的 Alias |
+| `limits` | 目前生效的查詢限制，與 `list_runtime_limits()` 相同 |
+| `schema` | 該服務可用的連線欄位、型別、必填與預設值 |
+
+設定 `MCPLAB_MCP_TOKEN` 後，此端點同樣需要 Bearer token：
+
+```bash
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:9800/config/status
+```
+
 ## 測試
 
 單元測試不依賴外部服務，可直接執行：

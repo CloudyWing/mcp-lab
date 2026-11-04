@@ -231,6 +231,10 @@ def main() -> int:
     runner.check("containers only receive their own config", check_config_isolation)
     runner.check("HTTP health endpoints are available", lambda: check_health_endpoints(status_by_service))
     runner.check(
+        "config status reports loaded settings without secrets",
+        lambda: check_config_status(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
         "API Contract MCP is reachable",
         lambda: check_api_contract_mcp(status_by_service, args.timeout_seconds),
     )
@@ -427,6 +431,54 @@ def check_health_endpoints(status_by_service: dict[str, dict[str, Any]]) -> None
         health = json.loads(body)
         if health.get("status") != "ok":
             raise SmokeError(f"{service} returned an invalid health response: {body}")
+
+
+def check_config_status(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    problems: list[str] = []
+    token = read_setting("MCPLAB_MCP_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    for service in EXPECTED_SERVICES:
+        url = service_url(status_by_service, service).removesuffix("/mcp") + "/config/status"
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+
+        status = json.loads(body)
+        config_file = status.get("config_file") or {}
+        if status.get("service") != service:
+            problems.append(f"{service}: reported service {status.get('service')!r}")
+        if not config_file.get("exists"):
+            problems.append(f"{service}: config file {config_file.get('path')} not found")
+        if config_file.get("last_error"):
+            problems.append(f"{service}: {config_file['last_error']}")
+        for connection in status.get("connections") or []:
+            if connection.get("state") != "loaded":
+                problems.append(f"{service}: {connection.get('alias')} {connection.get('state')} {connection.get('errors')}")
+        for ignored in status.get("ignored_settings") or []:
+            problems.append(f"{service}: {ignored.get('key')} ignored ({ignored.get('reason')})")
+
+        for secret in read_secret_values(service):
+            if secret in body:
+                problems.append(f"{service}: /config/status contains a secret value")
+                break
+
+    if problems:
+        raise SmokeError("; ".join(problems))
+
+
+def read_secret_values(service: str) -> list[str]:
+    path = service_config_path(service)
+    if not path.exists():
+        return []
+
+    secrets: list[str] = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        key, separator, value = line.partition("=")
+        value = value.strip().strip('"').strip("'")
+        if separator and len(value) >= 4 and re.search(r"(PASSWORD|TOKEN|SECRET|AUTH_HEADER_VALUE)$", key.strip()):
+            secrets.append(value)
+
+    return secrets
 
 
 def check_sql_server(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:

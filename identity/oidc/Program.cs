@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.Oidc;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -27,5 +28,6 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-oidc");
+app.MapConfigStatus<ConnectionRegistry>("mcp-oidc");
 app.MapMcp("/mcp");
 await app.RunAsync();

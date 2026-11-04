@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.Elastic;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -30,5 +31,9 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-elasticsearch");
+app.MapConfigStatus<ConnectionRegistry>(
+    "mcp-elasticsearch",
+    services => ConfigStatusEndpoint.ToolData(ActivatorUtilities.CreateInstance<ElasticTools>(services).ListRuntimeLimits())
+);
 app.MapMcp("/mcp");
 await app.RunAsync();

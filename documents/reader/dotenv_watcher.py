@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 import time
 from pathlib import Path
 
@@ -126,6 +127,16 @@ class DotEnvWatcher:
         self._thread: threading.Thread | None = None
         self._fingerprint: tuple[bool, int, int] | None = None
         self._last_error: str | None = None
+        self._last_loaded_at: str | None = None
+
+    def status(self) -> dict:
+        """回傳設定檔的載入狀態，不含設定值。"""
+        return {
+            "path": str(self._path),
+            "exists": self._path.exists(),
+            "last_loaded_at": self._last_loaded_at,
+            "last_error": self._last_error,
+        }
 
     def start(self) -> None:
         if self._thread is not None:
@@ -155,6 +166,8 @@ class DotEnvWatcher:
         self._fingerprint = fingerprint
 
         if not fingerprint[0]:
+            self._last_error = None
+            self._snapshot.update({})
             return
 
         try:
@@ -167,6 +180,7 @@ class DotEnvWatcher:
             return
 
         self._last_error = None
+        self._last_loaded_at = datetime.now(timezone.utc).isoformat()
         self._snapshot.update(values)
 
     def _get_fingerprint(self) -> tuple[bool, int, int]:

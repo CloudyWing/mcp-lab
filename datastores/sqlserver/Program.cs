@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.SqlServer;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -21,5 +22,9 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-sql-server");
+app.MapConfigStatus<ConnectionRegistry>(
+    "mcp-sql-server",
+    services => ConfigStatusEndpoint.ToolData(ActivatorUtilities.CreateInstance<SqlServerTools>(services).ListRuntimeLimits())
+);
 app.MapMcp("/mcp");
 await app.RunAsync();

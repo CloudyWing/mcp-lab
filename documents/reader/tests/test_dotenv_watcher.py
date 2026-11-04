@@ -52,6 +52,24 @@ class DotEnvWatcherTests(unittest.TestCase):
             finally:
                 watcher.stop()
 
+    def test_watcher_drops_file_values_when_file_is_deleted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "service.env"
+            path.write_text("DOCUMENT_LIST_DEFAULT_LIMIT=10\n", encoding="utf-8")
+            snapshot = DotEnvSnapshot({})
+            watcher = DotEnvWatcher(path, snapshot, interval_seconds=0.05)
+
+            try:
+                watcher.start()
+                self._wait_until(lambda: snapshot.current().get("DOCUMENT_LIST_DEFAULT_LIMIT") == "10")
+
+                path.unlink()
+
+                self._wait_until(lambda: "DOCUMENT_LIST_DEFAULT_LIMIT" not in snapshot.current())
+                self.assertFalse(watcher.status()["exists"])
+            finally:
+                watcher.stop()
+
     def test_watcher_keeps_previous_snapshot_when_parse_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / ".env"

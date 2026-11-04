@@ -1,5 +1,6 @@
 using CloudyWing.McpLab.Redis;
 using CloudyWing.McpLab.Shared;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -22,5 +23,9 @@ builder.Services
 WebApplication app = builder.Build();
 app.UseMcpAccessToken();
 app.MapMcpHealth("mcp-redis");
+app.MapConfigStatus<ConnectionRegistry>(
+    "mcp-redis",
+    services => ConfigStatusEndpoint.ToolData(ActivatorUtilities.CreateInstance<RedisTools>(services).ListRuntimeLimits())
+);
 app.MapMcp("/mcp");
 await app.RunAsync();

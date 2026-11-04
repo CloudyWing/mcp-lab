@@ -49,6 +49,22 @@ public sealed partial class DotEnvSnapshotProvider : IDotEnvSnapshotProvider {
     public event EventHandler<DotEnvReloadedEventArgs>? Reloaded;
 
     /// <summary>
+    /// Gets the watched file path.
+    /// </summary>
+    public string FilePath => source.Path;
+
+    /// <summary>
+    /// Gets when the file was last read successfully, or <see langword="null"/> before the first read.
+    /// </summary>
+    public DateTimeOffset? LastLoadedAt { get; private set; }
+
+    /// <summary>
+    /// Gets the error of the latest read, or <see langword="null"/> when it succeeded.
+    /// The previous snapshot stays active while this is set.
+    /// </summary>
+    public string? LastError { get; private set; }
+
+    /// <summary>
     /// Reloads the .env file if it can be parsed successfully.
     /// </summary>
     /// <param name="error">The reload error when parsing failed.</param>
@@ -60,10 +76,13 @@ public sealed partial class DotEnvSnapshotProvider : IDotEnvSnapshotProvider {
             parsed = DotEnvParser.Parse(source.ReadAllText());
         } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or FormatException) {
             error = ex.Message;
+            LastError = error;
             return false;
         }
 
         error = null;
+        LastError = null;
+        LastLoadedAt = DateTimeOffset.UtcNow;
         IReadOnlyDictionary<string, string> next = MergeWithBaseline(parsed);
         IReadOnlyDictionary<string, string> previous = Current;
 

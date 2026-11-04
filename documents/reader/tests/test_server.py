@@ -21,6 +21,12 @@ def _load_server_module():
         def run(self, *args, **kwargs):
             pass
 
+        def custom_route(self, *args, **kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
     mcp_module = types.ModuleType("mcp")
     server_module = types.ModuleType("mcp.server")
     fastmcp_module = types.ModuleType("mcp.server.fastmcp")
@@ -246,3 +252,17 @@ class AccessTokenTests(unittest.TestCase):
         health_calls, _ = self._call("/health", [])
         self.assertEqual(calls, ["/mcp"])
         self.assertEqual(health_calls, ["/health"])
+
+
+class ConfigStatusTests(unittest.TestCase):
+    def test_config_status_reports_file_state_and_limits_without_values(self):
+        server._SNAPSHOT.update({"DOCUMENT_MAX_IMAGES": "7", "MCPLAB_MCP_TOKEN": "secret"})
+        try:
+            status = server.config_status()
+        finally:
+            server._SNAPSHOT.update({})
+
+        self.assertEqual(status["service"], "mcp-reader")
+        self.assertIn("last_error", status["config_file"])
+        self.assertEqual(status["limits"]["max_images"], 7)
+        self.assertNotIn("secret", str(status))
