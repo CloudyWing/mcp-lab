@@ -1,0 +1,41 @@
+# Version updates arrive as pull requests and go through the full CI, including the integration
+# and admin end-to-end tests, before they are merged.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      nuget:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: pip
+    directory: /documents/reader
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      reader:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /tests/admin-e2e
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: docker-compose
+    directory: /tests/integration
+    schedule:
+      interval: weekly
+      day: monday

@@ -45,6 +45,7 @@ def prepare(args: argparse.Namespace) -> None:
 
     lines = [
         "COMPOSE_PROJECT_NAME=mcp-lab",
+        "TZ=UTC",
         f"MCPLAB_RUNTIME_UID={os.getuid()}",
         f"MCPLAB_RUNTIME_GID={os.getgid()}",
         f"DOCUMENT_HOST_MOUNT_ROOT={TEST_ROOT / 'docs'}",

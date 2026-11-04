@@ -221,6 +221,17 @@ python3 scripts/check-all.py --build-services --smoke
 python3 scripts/check-all.py --build-services --smoke --include-oracle
 ```
 
+## 相依套件
+
+- .NET 套件版本集中在 `Directory.Packages.props`。
+- Reader 的直接相依寫在 `documents/reader/requirements.in`，`requirements.txt` 是由 `pip-compile` 產生的完整 lock，建置映像時只安裝 lock 中的版本。修改 `requirements.in` 後重新產生：
+
+  ```bash
+  pip-compile --no-emit-index-url --strip-extras --output-file documents/reader/requirements.txt documents/reader/requirements.in
+  ```
+
+- Dependabot（`.github/dependabot.yml`）每週一檢查 NuGet、pip、npm、GitHub Actions 與測試用 Docker 映像，更新會以 PR 送出，並經過完整 CI（含整合測試與 E2E）。
+
 ## 環境變數一覽
 
 完整清單請見 [docs/environment-variables.md](./docs/environment-variables.md)。
