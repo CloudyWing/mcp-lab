@@ -86,7 +86,7 @@ def main() -> int:
         if not args.skip_e2e:
             e2e = TEST_ROOT.parent / "admin-e2e"
             run(
-                ["node", str(e2e / "admin.e2e.mjs")],
+                ["node", str(e2e / "admin.e2e.cjs")],
                 env={**os.environ, "MCPLAB_ADMIN_URL": "http://127.0.0.1:9890", "MCPLAB_ADMIN_PASSWORD": ADMIN_PASSWORD},
             )
     except subprocess.CalledProcessError:
