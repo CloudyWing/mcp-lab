@@ -1,3 +1,4 @@
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -6,7 +7,7 @@ namespace CloudyWing.McpLab.Elastic;
 /// <summary>
 /// Loads and exposes named Elasticsearch connection configurations from environment variables.
 /// </summary>
-public sealed partial class ConnectionRegistry {
+public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// <summary>
     /// Named HTTP client key used for connections with default TLS validation.
     /// </summary>
@@ -18,10 +19,7 @@ public sealed partial class ConnectionRegistry {
     public const string SslSkipClientKey = "elastic-ssl-skip";
 
     private readonly IHttpClientFactory httpClientFactory;
-    private readonly IDotEnvSnapshotProvider snapshotProvider;
-    private readonly ILogger<ConnectionRegistry> logger;
-    private IReadOnlyDictionary<string, ConnectionConfig> current =
-        new Dictionary<string, ConnectionConfig>(StringComparer.OrdinalIgnoreCase);
+    private readonly ConnectionRegistryCore<ConnectionConfig> core;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -39,35 +37,21 @@ public sealed partial class ConnectionRegistry {
         ArgumentNullException.ThrowIfNull(logger);
 
         this.httpClientFactory = httpClientFactory;
-        this.snapshotProvider = snapshotProvider;
-        this.logger = logger;
-        Rebuild(snapshotProvider.Current);
-        this.snapshotProvider.Reloaded += HandleDotEnvReloaded;
+        core = new(ConnectionSchemas.Elasticsearch, snapshotProvider, logger, BuildConfig);
     }
 
     /// <summary>
     /// Gets all loaded connections, keyed by connection name (case-insensitive).
     /// </summary>
-    public IReadOnlyDictionary<string, ConnectionConfig> All => Volatile.Read(ref current);
+    public IReadOnlyDictionary<string, ConnectionConfig> All => core.All;
+
+    /// <inheritdoc />
+    public ConnectionRegistryStatus Status => core.Status;
 
     /// <summary>
-    /// Returns the named connection, or the first available when <paramref name="name"/> is empty; throws <see cref="KeyNotFoundException"/> when not found.
+    /// Returns the named connection, or the first available when <paramref name="name"/> is empty.
     /// </summary>
-    public ConnectionConfig Get(string? name) {
-        IReadOnlyDictionary<string, ConnectionConfig> all = All;
-
-        if (all.Count == 0) {
-            throw new InvalidOperationException("No Elasticsearch connections configured. Set ES_CONN_<name>_URL in environment.");
-        }
-
-        if (string.IsNullOrWhiteSpace(name)) {
-            return all.Values.First();
-        }
-
-        return all.TryGetValue(name, out ConnectionConfig? cfg)
-            ? cfg
-            : throw new KeyNotFoundException($"Connection '{name}' not found. Available: {string.Join(", ", all.Keys)}");
-    }
+    public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
     /// Creates and configures an <see cref="HttpClient"/> for the specified named Elasticsearch connection.
@@ -91,74 +75,15 @@ public sealed partial class ConnectionRegistry {
         return http;
     }
 
-    private void HandleDotEnvReloaded(object? sender, DotEnvReloadedEventArgs e) {
-        Rebuild(e.Current);
-    }
+    /// <inheritdoc />
+    public void Dispose() => core.Dispose();
 
-    private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
-        IReadOnlyDictionary<string, ConnectionConfig> previous = All;
-        Dictionary<string, Dictionary<string, string>> buckets =
-            EnvironmentConnectionSettings.LoadBuckets(snapshot, EnvRegex());
-
-        Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
-                cfg,
-                "name",
-                "url",
-                "user",
-                "password",
-                "ssl_skip_verify"
-            )) {
-                continue;
-            }
-
-            try {
-                ConnectionConfig config = BuildConfig(aliasKey, cfg);
-                result[config.Name] = config;
-            } catch (InvalidOperationException ex) {
-                string configuredName = EnvironmentConnectionSettings.GetString(cfg, "name");
-
-                if (!string.IsNullOrWhiteSpace(configuredName) && previous.TryGetValue(configuredName, out ConnectionConfig? previousConfig)) {
-                    result[configuredName] = previousConfig;
-                }
-
-                LogConnectionRebuildFailed(logger, aliasKey, ex.Message);
-            }
-        }
-
-        Volatile.Write(ref current, result);
-    }
-
-    private static ConnectionConfig BuildConfig(string aliasKey, IReadOnlyDictionary<string, string> cfg) {
-        string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "name");
-        string url = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "url");
-        string user = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "user");
-        string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "ES_CONN", "password");
-        bool sslSkipVerify = EnvironmentConnectionSettings.GetRequiredBool(
-            cfg,
-            aliasKey,
-            "ES_CONN",
-            "ssl_skip_verify"
+    private static ConnectionConfig BuildConfig(ConnectionValues values) =>
+        new(
+            Name: values.Name,
+            Url: values.GetString("URL"),
+            User: values.GetString("USER"),
+            Password: values.GetString("PASSWORD"),
+            SslSkipVerify: values.GetBool("SSL_SKIP_VERIFY")
         );
-
-        return new ConnectionConfig(
-            Name: name,
-            Url: url,
-            User: user,
-            Password: password,
-            SslSkipVerify: sslSkipVerify
-        );
-    }
-
-    [GeneratedRegex(@"^ES_CONN_([A-Z0-9]+)_([A-Z0-9_]+)$", RegexOptions.Compiled)]
-    private static partial Regex EnvRegex();
-
-    [LoggerMessage(
-        EventId = 2501,
-        Level = LogLevel.Warning,
-        Message = "Elasticsearch connection '{AliasKey}' rebuild failed: {Reason}; previous configuration retained when available"
-    )]
-    private static partial void LogConnectionRebuildFailed(ILogger logger, string aliasKey, string reason);
 }

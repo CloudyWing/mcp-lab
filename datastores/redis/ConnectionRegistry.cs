@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -8,13 +9,10 @@ namespace CloudyWing.McpLab.Redis;
 /// Loads and exposes named Redis connection configurations from environment variables,
 /// and keeps one shared multiplexer per configuration.
 /// </summary>
-public sealed partial class ConnectionRegistry : IDisposable {
+public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     private static readonly TimeSpan RetiredMultiplexerGracePeriod = TimeSpan.FromSeconds(30);
     private readonly ConcurrentDictionary<ConnectionConfig, Lazy<Task<IConnectionMultiplexer>>> multiplexers = new();
-    private readonly IDotEnvSnapshotProvider snapshotProvider;
-    private readonly ILogger<ConnectionRegistry> logger;
-    private IReadOnlyDictionary<string, ConnectionConfig> current =
-        new Dictionary<string, ConnectionConfig>(StringComparer.OrdinalIgnoreCase);
+    private readonly ConnectionRegistryCore<ConnectionConfig> core;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -25,35 +23,22 @@ public sealed partial class ConnectionRegistry : IDisposable {
         ArgumentNullException.ThrowIfNull(snapshotProvider);
         ArgumentNullException.ThrowIfNull(logger);
 
-        this.snapshotProvider = snapshotProvider;
-        this.logger = logger;
-        Rebuild(snapshotProvider.Current);
-        this.snapshotProvider.Reloaded += HandleDotEnvReloaded;
+        core = new(ConnectionSchemas.Redis, snapshotProvider, logger, BuildConfig);
+        core.Rebuilt += RetireStaleMultiplexers;
     }
 
     /// <summary>
     /// Gets all loaded connections, keyed by connection name (case-insensitive).
     /// </summary>
-    public IReadOnlyDictionary<string, ConnectionConfig> All => Volatile.Read(ref current);
+    public IReadOnlyDictionary<string, ConnectionConfig> All => core.All;
+
+    /// <inheritdoc />
+    public ConnectionRegistryStatus Status => core.Status;
 
     /// <summary>
-    /// Returns the named connection, or the first available when <paramref name="name"/> is empty; throws <see cref="KeyNotFoundException"/> when not found.
+    /// Returns the named connection, or the first available when <paramref name="name"/> is empty.
     /// </summary>
-    public ConnectionConfig Get(string? name) {
-        IReadOnlyDictionary<string, ConnectionConfig> all = All;
-
-        if (all.Count == 0) {
-            throw new InvalidOperationException("No Redis connections configured. Set REDIS_CONN_<name>_HOST in environment.");
-        }
-
-        if (string.IsNullOrWhiteSpace(name)) {
-            return all.Values.First();
-        }
-
-        return all.TryGetValue(name, out ConnectionConfig? cfg)
-            ? cfg
-            : throw new KeyNotFoundException($"Connection '{name}' not found. Available: {string.Join(", ", all.Keys)}");
-    }
+    public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
     /// Returns the shared <see cref="IConnectionMultiplexer"/> for the specified named connection.
@@ -81,7 +66,8 @@ public sealed partial class ConnectionRegistry : IDisposable {
 
     /// <inheritdoc />
     public void Dispose() {
-        snapshotProvider.Reloaded -= HandleDotEnvReloaded;
+        core.Rebuilt -= RetireStaleMultiplexers;
+        core.Dispose();
 
         foreach (ConnectionConfig key in multiplexers.Keys) {
             if (multiplexers.TryRemove(key, out Lazy<Task<IConnectionMultiplexer>>? lazy)) {
@@ -127,75 +113,12 @@ public sealed partial class ConnectionRegistry : IDisposable {
         }
     }
 
-    private void HandleDotEnvReloaded(object? sender, DotEnvReloadedEventArgs e) {
-        Rebuild(e.Current);
-    }
-
-    private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
-        IReadOnlyDictionary<string, ConnectionConfig> previous = All;
-        Dictionary<string, Dictionary<string, string>> buckets =
-            EnvironmentConnectionSettings.LoadBuckets(snapshot, EnvRegex());
-
-        Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!EnvironmentConnectionSettings.HasConfiguredConnection(
-                cfg,
-                "name",
-                "host",
-                "password",
-                "database"
-            )) {
-                continue;
-            }
-
-            try {
-                ConnectionConfig config = BuildConfig(aliasKey, cfg);
-                result[config.Name] = config;
-            } catch (InvalidOperationException ex) {
-                string configuredName = EnvironmentConnectionSettings.GetString(cfg, "name");
-
-                if (!string.IsNullOrWhiteSpace(configuredName) && previous.TryGetValue(configuredName, out ConnectionConfig? previousConfig)) {
-                    result[configuredName] = previousConfig;
-                }
-
-                LogConnectionRebuildFailed(logger, aliasKey, ex.Message);
-            }
-        }
-
-        Volatile.Write(ref current, result);
-        RetireStaleMultiplexers(result);
-    }
-
-    private static ConnectionConfig BuildConfig(string aliasKey, IReadOnlyDictionary<string, string> cfg) {
-        string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "name");
-        string host = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "host");
-        int port = EnvironmentConnectionSettings.GetOptionalPort(cfg, aliasKey, "REDIS_CONN", 6379, "port", "port");
-        string password = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "REDIS_CONN", "password");
-        int database = EnvironmentConnectionSettings.GetRequiredNonNegativeInt(
-            cfg,
-            aliasKey,
-            "REDIS_CONN",
-            "database",
-            "database number"
+    private static ConnectionConfig BuildConfig(ConnectionValues values) =>
+        new(
+            Name: values.Name,
+            Host: values.GetString("HOST"),
+            Port: values.GetInt("PORT"),
+            Password: values.GetString("PASSWORD"),
+            Database: values.GetInt("DATABASE")
         );
-
-        return new ConnectionConfig(
-            Name: name,
-            Host: host,
-            Port: port,
-            Password: password,
-            Database: database
-        );
-    }
-
-    [GeneratedRegex(@"^REDIS_CONN_([A-Z0-9]+)_([A-Z0-9]+)$", RegexOptions.Compiled)]
-    private static partial Regex EnvRegex();
-
-    [LoggerMessage(
-        EventId = 2301,
-        Level = LogLevel.Warning,
-        Message = "Redis connection '{AliasKey}' rebuild failed: {Reason}; previous configuration retained when available"
-    )]
-    private static partial void LogConnectionRebuildFailed(ILogger logger, string aliasKey, string reason);
 }

@@ -40,17 +40,25 @@ MSSQL_CONN_STAGE_PASSWORD=pw2
 
 Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="staging"` 指定目標。讀取類工具未指定時使用第一個已設定的連線；寫入類工具（如 `execute`、`set_key`、`delete_by_query`、`publish`）必須明確指定 `connection`，否則回傳 `blocked`。
 
-| 服務 | 環境變數前綴 | 必填欄位 |
-| --- | --- | --- |
-| mcp-api-contract | `API_CONTRACT_CONN` | SPEC_URL 或 SPEC_PATH |
-| mcp-sql-server | `MSSQL_CONN` | HOST, PORT |
-| mcp-oracle | `ORACLE_CONN` | HOST, PORT, SERVICE |
-| mcp-elasticsearch | `ES_CONN` | URL |
-| mcp-redis | `REDIS_CONN` | HOST, PORT |
-| mcp-oidc | `OIDC_CONN` | ISSUER |
-| mcp-mosquitto | `MQTT_CONN` | HOST, PORT |
-| mcp-rabbitmq | `RABBITMQ_CONN` | HOST, MGMTPORT |
-| mcp-mailpit | `MAILPIT_CONN` | URL |
+| 服務 | 環境變數前綴 | 必填欄位 | 選填欄位（預設值） |
+| --- | --- | --- | --- |
+| mcp-api-contract | `API_CONTRACT_CONN` | SPEC_URL 或 SPEC_PATH | BASE_URL、INVOKE_ENABLED（false）、ALLOWED_METHODS（GET,HEAD,OPTIONS）、SSL_SKIP_VERIFY（false）、AUTH_HEADER_NAME、AUTH_HEADER_VALUE |
+| mcp-sql-server | `MSSQL_CONN` | HOST、USER、PASSWORD | PORT（1433）、DATABASE（master） |
+| mcp-oracle | `ORACLE_CONN` | HOST、SERVICE、USER、PASSWORD | PORT（1521） |
+| mcp-elasticsearch | `ES_CONN` | URL | USER、PASSWORD、SSL_SKIP_VERIFY（false） |
+| mcp-redis | `REDIS_CONN` | HOST | PORT（6379）、PASSWORD、DATABASE（0） |
+| mcp-oidc | `OIDC_CONN` | ISSUER | DISCOVERY_URL、AUDIENCE、REQUIRE_HTTPS_METADATA（true） |
+| mcp-mosquitto | `MQTT_CONN` | HOST | PORT（1883）、USER、PASSWORD |
+| mcp-rabbitmq | `RABBITMQ_CONN` | HOST、USER、PASSWORD | MGMTPORT（15672） |
+| mcp-mailpit | `MAILPIT_CONN` | URL | — |
+
+每個連線都可設定 `NAME`，未填時使用 Alias 的小寫（例如 `PROD` → `prod`）。欄位定義集中在 `shared/McpLab.Shared/Configuration/ConnectionSchemas.cs`，解析時會檢查：
+
+- 必填欄位、Port 範圍、`true`/`false`、URL 格式。
+- 打錯的欄位名稱（例如 `HOTS`）與含底線或小寫的 Alias，這類設定會被忽略並記錄原因。
+- 重複的 `NAME`：後出現的連線會被拒絕，不會覆蓋前一個。
+
+連線設定有誤時，若該連線先前載入成功，會繼續使用前一版設定。
 
 ## 快速開始
 

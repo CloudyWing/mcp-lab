@@ -1,3 +1,4 @@
+using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -6,7 +7,7 @@ namespace CloudyWing.McpLab.ApiContract;
 /// <summary>
 /// Loads and exposes named API contract profiles from environment variables.
 /// </summary>
-public sealed partial class ConnectionRegistry {
+public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// <summary>
     /// Named HTTP client key for normal TLS validation.
     /// </summary>
@@ -17,12 +18,8 @@ public sealed partial class ConnectionRegistry {
     /// </summary>
     public const string SslSkipClientKey = "api-contract-ssl-skip";
 
-    private static readonly string[] DefaultAllowedMethods = ["GET", "HEAD", "OPTIONS"];
     private readonly IHttpClientFactory httpClientFactory;
-    private readonly IDotEnvSnapshotProvider snapshotProvider;
-    private readonly ILogger<ConnectionRegistry> logger;
-    private IReadOnlyDictionary<string, ConnectionConfig> current =
-        new Dictionary<string, ConnectionConfig>(StringComparer.OrdinalIgnoreCase);
+    private readonly ConnectionRegistryCore<ConnectionConfig> core;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -40,39 +37,21 @@ public sealed partial class ConnectionRegistry {
         ArgumentNullException.ThrowIfNull(logger);
 
         this.httpClientFactory = httpClientFactory;
-        this.snapshotProvider = snapshotProvider;
-        this.logger = logger;
-        Rebuild(snapshotProvider.Current);
-        this.snapshotProvider.Reloaded += HandleDotEnvReloaded;
+        core = new(ConnectionSchemas.ApiContract, snapshotProvider, logger, BuildConfig);
     }
 
     /// <summary>
     /// Gets all loaded connections, keyed by connection name (case-insensitive).
     /// </summary>
-    public IReadOnlyDictionary<string, ConnectionConfig> All => Volatile.Read(ref current);
+    public IReadOnlyDictionary<string, ConnectionConfig> All => core.All;
+
+    /// <inheritdoc />
+    public ConnectionRegistryStatus Status => core.Status;
 
     /// <summary>
     /// Returns the named connection, or the first available when <paramref name="name"/> is empty.
     /// </summary>
-    public ConnectionConfig Get(string? name) {
-        IReadOnlyDictionary<string, ConnectionConfig> all = All;
-
-        if (all.Count == 0) {
-            throw new InvalidOperationException(
-                "No API contract profiles configured. Set API_CONTRACT_CONN_<name>_SPEC_URL or SPEC_PATH."
-            );
-        }
-
-        if (string.IsNullOrWhiteSpace(name)) {
-            return all.Values.First();
-        }
-
-        return all.TryGetValue(name, out ConnectionConfig? cfg)
-            ? cfg
-            : throw new KeyNotFoundException(
-                $"Connection '{name}' not found. Available: {string.Join(", ", all.Keys)}"
-            );
-    }
+    public ConnectionConfig Get(string? name) => core.Get(name);
 
     /// <summary>
     /// Creates an <see cref="HttpClient"/> for the specified profile.
@@ -80,103 +59,21 @@ public sealed partial class ConnectionRegistry {
     public HttpClient CreateClient(ConnectionConfig cfg) =>
         httpClientFactory.CreateClient(cfg.SslSkipVerify ? SslSkipClientKey : PlainClientKey);
 
-    private void HandleDotEnvReloaded(object? sender, DotEnvReloadedEventArgs e) {
-        Rebuild(e.Current);
-    }
+    /// <inheritdoc />
+    public void Dispose() => core.Dispose();
 
-    private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
-        IReadOnlyDictionary<string, ConnectionConfig> previous = All;
-        Dictionary<string, Dictionary<string, string>> buckets =
-            EnvironmentConnectionSettings.LoadBuckets(snapshot, EnvRegex());
-
-        Dictionary<string, ConnectionConfig> result = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach ((string aliasKey, Dictionary<string, string> cfg) in buckets) {
-            if (!EnvironmentConnectionSettings.HasConfiguredConnection(cfg, "name", "spec_url", "spec_path")) {
-                continue;
-            }
-
-            try {
-                ConnectionConfig config = BuildConfig(aliasKey, cfg);
-                result[config.Name] = config;
-            } catch (InvalidOperationException ex) {
-                string configuredName = EnvironmentConnectionSettings.GetString(cfg, "name");
-
-                if (!string.IsNullOrWhiteSpace(configuredName) && previous.TryGetValue(configuredName, out ConnectionConfig? previousConfig)) {
-                    result[configuredName] = previousConfig;
-                }
-
-                LogConnectionRebuildFailed(logger, aliasKey, ex.Message);
-            }
-        }
-
-        Volatile.Write(ref current, result);
-    }
-
-    private static ConnectionConfig BuildConfig(string aliasKey, IReadOnlyDictionary<string, string> cfg) {
-        string name = EnvironmentConnectionSettings.GetRequiredString(cfg, aliasKey, "API_CONTRACT_CONN", "name");
-        string specUrl = EnvironmentConnectionSettings.GetString(cfg, "spec_url");
-        string specPath = EnvironmentConnectionSettings.GetString(cfg, "spec_path");
-
-        if (string.IsNullOrWhiteSpace(specUrl) && string.IsNullOrWhiteSpace(specPath)) {
-            throw new InvalidOperationException(
-                $"Connection '{aliasKey}': API_CONTRACT_CONN_{aliasKey}_SPEC_URL or SPEC_PATH is required."
-            );
-        }
-
-        return new ConnectionConfig(
-            name,
-            specUrl,
-            specPath,
-            EnvironmentConnectionSettings.GetString(cfg, "base_url"),
-            ParseAllowedMethods(EnvironmentConnectionSettings.GetString(cfg, "allowed_methods")),
-            GetOptionalBool(cfg, aliasKey, "invoke_enabled", defaultValue: false),
-            GetOptionalBool(cfg, aliasKey, "ssl_skip_verify", defaultValue: false),
-            EnvironmentConnectionSettings.GetString(cfg, "auth_header_name"),
-            EnvironmentConnectionSettings.GetString(cfg, "auth_header_value")
+    private static ConnectionConfig BuildConfig(ConnectionValues values) =>
+        new(
+            values.Name,
+            values.GetString("SPEC_URL"),
+            values.GetString("SPEC_PATH"),
+            values.GetString("BASE_URL"),
+            values.GetList("ALLOWED_METHODS")
+                .Select(method => method.ToUpperInvariant())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
+            values.GetBool("INVOKE_ENABLED"),
+            values.GetBool("SSL_SKIP_VERIFY"),
+            values.GetString("AUTH_HEADER_NAME"),
+            values.GetString("AUTH_HEADER_VALUE")
         );
-    }
-
-    private static IReadOnlySet<string> ParseAllowedMethods(string value) {
-        string[] methods = string.IsNullOrWhiteSpace(value)
-            ? DefaultAllowedMethods
-            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        return methods
-            .Select(method => method.ToUpperInvariant())
-            .Where(method => !string.IsNullOrWhiteSpace(method))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static bool GetOptionalBool(
-        IReadOnlyDictionary<string, string> cfg,
-        string aliasKey,
-        string field,
-        bool defaultValue
-    ) {
-        string value = EnvironmentConnectionSettings.GetString(cfg, field);
-
-        if (string.IsNullOrWhiteSpace(value)) {
-            return defaultValue;
-        }
-
-        if (!bool.TryParse(value, out bool result)) {
-            throw new InvalidOperationException(
-                $"Connection '{aliasKey}': API_CONTRACT_CONN_{aliasKey}_{field.ToUpperInvariant()} " +
-                "must be true or false."
-            );
-        }
-
-        return result;
-    }
-
-    [GeneratedRegex(@"^API_CONTRACT_CONN_([A-Z0-9]+)_([A-Z0-9_]+)$", RegexOptions.Compiled)]
-    private static partial Regex EnvRegex();
-
-    [LoggerMessage(
-        EventId = 2801,
-        Level = LogLevel.Warning,
-        Message = "API contract connection '{AliasKey}' rebuild failed: {Reason}; previous configuration retained when available"
-    )]
-    private static partial void LogConnectionRebuildFailed(ILogger logger, string aliasKey, string reason);
 }
