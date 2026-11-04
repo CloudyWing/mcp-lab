@@ -4,5 +4,7 @@ namespace CloudyWing.McpLab.SqlServer;
 /// Stores host, port, and credentials for a single named SQL Server connection.
 /// </summary>
 public sealed record ConnectionConfig(
-    string Name, string Host, int Port, string User, string Password, string Database
+    string Name, string Host, int Port, string User, string Password, string Database,
+    bool TrustServerCertificate = true,
+    int ConnectTimeoutSeconds = 30
 );

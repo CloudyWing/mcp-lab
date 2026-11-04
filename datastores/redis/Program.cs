@@ -1,6 +1,5 @@
 using CloudyWing.McpLab.Redis;
 using CloudyWing.McpLab.Shared;
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";

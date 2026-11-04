@@ -19,6 +19,8 @@ public static class ConnectionSchemas {
         new("USER", ConnectionFieldKind.Text, "SQL 驗證帳號", Required: true),
         new("PASSWORD", ConnectionFieldKind.Secret, "SQL 驗證密碼", Required: true),
         new("DATABASE", ConnectionFieldKind.Text, "預設資料庫", DefaultValue: "master"),
+        new("TRUST_SERVER_CERTIFICATE", ConnectionFieldKind.Bool, "信任伺服器憑證而不驗證；連線到已設定正式憑證的伺服器時建議設為 false", DefaultValue: "true"),
+        new("CONNECT_TIMEOUT", ConnectionFieldKind.PositiveInt, "建立連線的逾時秒數", DefaultValue: "30"),
     ]);
 
     /// <summary>Oracle.</summary>
@@ -47,6 +49,8 @@ public static class ConnectionSchemas {
         new("PORT", ConnectionFieldKind.Port, "連接埠", DefaultValue: "6379"),
         new("PASSWORD", ConnectionFieldKind.Secret, "密碼，未設定 requirepass 時留空"),
         new("DATABASE", ConnectionFieldKind.NonNegativeInt, "資料庫編號", DefaultValue: "0"),
+        new("CONNECT_TIMEOUT", ConnectionFieldKind.PositiveInt, "建立連線的逾時秒數", DefaultValue: "5"),
+        new("OPERATION_TIMEOUT", ConnectionFieldKind.PositiveInt, "單一指令的逾時秒數", DefaultValue: "10"),
     ]);
 
     /// <summary>OIDC.</summary>

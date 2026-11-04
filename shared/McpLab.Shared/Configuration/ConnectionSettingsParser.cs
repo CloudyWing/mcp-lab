@@ -191,6 +191,8 @@ public static partial class ConnectionSettingsParser {
                 || port is < 1 or > 65535 => "must be a port number between 1 and 65535.",
             ConnectionFieldKind.NonNegativeInt when !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _)
                 => "must be an integer of 0 or greater.",
+            ConnectionFieldKind.PositiveInt when !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int positive)
+                || positive < 1 => "must be an integer of 1 or greater.",
             ConnectionFieldKind.Bool when !bool.TryParse(value, out _) => "must be true or false.",
             ConnectionFieldKind.Url when !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)

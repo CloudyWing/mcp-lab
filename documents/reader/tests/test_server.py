@@ -265,4 +265,14 @@ class ConfigStatusTests(unittest.TestCase):
         self.assertEqual(status["service"], "mcp-reader")
         self.assertIn("last_error", status["config_file"])
         self.assertEqual(status["limits"]["max_images"], 7)
+        settings = {item["name"]: item for item in status["settings"]}
+        self.assertEqual(settings["DOCUMENT_MAX_IMAGES"]["effective"], 7)
+        self.assertEqual(settings["DOCUMENT_LIST_DEFAULT_LIMIT"]["max_from"], "DOCUMENT_LIST_MAX_LIMIT")
         self.assertNotIn("secret", str(status))
+
+    def test_default_limit_is_capped_by_configured_max(self):
+        server._SNAPSHOT.update({"DOCUMENT_LIST_MAX_LIMIT": "50", "DOCUMENT_LIST_DEFAULT_LIMIT": "80"})
+        try:
+            self.assertEqual(server._list_default_limit(), 50)
+        finally:
+            server._SNAPSHOT.update({})

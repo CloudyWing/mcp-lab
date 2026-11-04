@@ -7,6 +7,7 @@ global using System.Text.Json.Nodes;
 global using System.Text.Json.Serialization;
 global using System.Text.RegularExpressions;
 global using CloudyWing.McpLab.Shared;
+global using CloudyWing.McpLab.Shared.Configuration;
 global using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 global using Microsoft.IdentityModel.Tokens;
 global using ModelContextProtocol.Server;

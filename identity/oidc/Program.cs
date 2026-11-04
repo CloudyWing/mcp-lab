@@ -1,6 +1,5 @@
 using CloudyWing.McpLab.Oidc;
 using CloudyWing.McpLab.Shared;
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -12,7 +11,6 @@ builder.Services.AddSingleton<ConnectionRegistry>();
 builder.Services.AddSingleton<OidcDocumentClient>();
 builder.Services.AddHttpClient(ConnectionRegistry.ClientKey)
     .ConfigureHttpClient(c => {
-        c.Timeout = TimeSpan.FromSeconds(10);
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     });
 builder.Services

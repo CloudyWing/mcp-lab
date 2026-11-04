@@ -43,10 +43,10 @@ Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="st
 | 服務 | 環境變數前綴 | 必填欄位 | 選填欄位（預設值） |
 | --- | --- | --- | --- |
 | mcp-api-contract | `API_CONTRACT_CONN` | SPEC_URL 或 SPEC_PATH | BASE_URL、INVOKE_ENABLED（false）、ALLOWED_METHODS（GET,HEAD,OPTIONS）、SSL_SKIP_VERIFY（false）、AUTH_HEADER_NAME、AUTH_HEADER_VALUE |
-| mcp-sql-server | `MSSQL_CONN` | HOST、USER、PASSWORD | PORT（1433）、DATABASE（master） |
+| mcp-sql-server | `MSSQL_CONN` | HOST、USER、PASSWORD | PORT（1433）、DATABASE（master）、TRUST_SERVER_CERTIFICATE（true）、CONNECT_TIMEOUT（30 秒） |
 | mcp-oracle | `ORACLE_CONN` | HOST、SERVICE、USER、PASSWORD | PORT（1521） |
 | mcp-elasticsearch | `ES_CONN` | URL | USER、PASSWORD、SSL_SKIP_VERIFY（false） |
-| mcp-redis | `REDIS_CONN` | HOST | PORT（6379）、PASSWORD、DATABASE（0） |
+| mcp-redis | `REDIS_CONN` | HOST | PORT（6379）、PASSWORD、DATABASE（0）、CONNECT_TIMEOUT（5 秒）、OPERATION_TIMEOUT（10 秒） |
 | mcp-oidc | `OIDC_CONN` | ISSUER | DISCOVERY_URL、AUDIENCE、REQUIRE_HTTPS_METADATA（true） |
 | mcp-mosquitto | `MQTT_CONN` | HOST | PORT（1883）、USER、PASSWORD |
 | mcp-rabbitmq | `RABBITMQ_CONN` | HOST、USER、PASSWORD | MGMTPORT（15672） |
@@ -202,6 +202,20 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | Oracle | `ORACLE_MAX_CELL_CHARS` | 4000 | 100000 |
 | Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
 | Redis | `REDIS_MAX_ROWS` / `MAX_ROWS` | 100 | 1000 |
+
+HTTP 逾時與 API Contract 回應上限：
+
+| 服務 | 變數 | 預設值 | 上限 |
+| --- | --- | --- | --- |
+| Elasticsearch | `ES_HTTP_TIMEOUT` | 30 秒 | 300 秒 |
+| API Contract | `API_CONTRACT_HTTP_TIMEOUT` | 15 秒 | 300 秒 |
+| OIDC | `OIDC_HTTP_TIMEOUT` | 10 秒 | 300 秒 |
+| RabbitMQ | `RABBITMQ_HTTP_TIMEOUT` | 10 秒 | 300 秒 |
+| Mailpit | `MAILPIT_HTTP_TIMEOUT` | 10 秒 | 300 秒 |
+| API Contract | `API_CONTRACT_DEFAULT_BODY_BYTES` | 50000 | 10000000 |
+| API Contract | `API_CONTRACT_MAX_BODY_BYTES` | 200000 | 10000000 |
+
+以上設定與連線的逾時欄位都會熱重載，修改後不需重啟容器。服務層級設定集中定義在 `shared/McpLab.Shared/Configuration/ServiceSettings.cs`，`/config/status` 的 `settings` 會列出每個設定的預設值、範圍與目前生效值。
 
 `*_MAX_CELL_CHARS` 限制單一欄位回傳的字元數，超過的部分會截斷並標示原始長度。Redis 的 `get_key` 讀取 list、set、sorted set、hash 時，最多回傳 `REDIS_MAX_ROWS` 筆，並回傳 `total_count` 與 `truncated`。
 

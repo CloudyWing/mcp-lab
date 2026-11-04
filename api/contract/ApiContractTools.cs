@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.ApiContract;
 
 /// <summary>
@@ -7,20 +9,30 @@ namespace CloudyWing.McpLab.ApiContract;
 public sealed class ApiContractTools {
     private const int DefaultListLimit = 100;
     private const int MaxListLimit = 500;
-    private const int DefaultBodyLimit = 50000;
-    private const int MaxBodyLimit = 200000;
     private const int DefaultIssueLimit = 50;
     private const int MaxIssueLimit = 200;
     private readonly ConnectionRegistry registry;
     private readonly SpecSourceClient specClient;
+    private readonly IDotEnvSnapshotProvider? snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ApiContractTools"/>.
     /// </summary>
-    public ApiContractTools(ConnectionRegistry registry, SpecSourceClient specClient) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="specClient">The OpenAPI spec loader.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider used to read body size limits.</param>
+    public ApiContractTools(
+        ConnectionRegistry registry,
+        SpecSourceClient specClient,
+        IDotEnvSnapshotProvider? snapshotProvider = null
+    ) {
         this.registry = registry;
         this.specClient = specClient;
+        this.snapshotProvider = snapshotProvider;
     }
+
+    private IReadOnlyDictionary<string, string> Settings =>
+        snapshotProvider?.Current ?? new Dictionary<string, string>();
 
     /// <summary>
     /// Lists all configured API contract profiles.
@@ -153,15 +165,16 @@ public sealed class ApiContractTools {
         [Description("Query parameter JSON object")] string queryJson = "",
         [Description("額外 header JSON object，不應傳入機密")] string headersJson = "",
         [Description("Request body JSON，非 safe method 才會使用")] string bodyJson = "",
-        [Description("最大回傳 body bytes，預設 50000，上限 200000")] int maxBodyBytes = 0
+        [Description("最大回傳 body bytes，預設與上限由 API_CONTRACT_DEFAULT_BODY_BYTES、API_CONTRACT_MAX_BODY_BYTES 設定")] int maxBodyBytes = 0
     ) {
         try {
             string normalizedMethod = method.ToUpperInvariant();
+            int maxBodyLimit = ServiceSettings.ApiContract.MaxBodyBytes.Read(Settings);
             int safeMaxBodyBytes = ToolRuntimeOptions.NormalizeRequestedInt32(
                 maxBodyBytes,
-                DefaultBodyLimit,
+                Math.Min(ServiceSettings.ApiContract.DefaultBodyBytes.Read(Settings), maxBodyLimit),
                 1,
-                MaxBodyLimit
+                maxBodyLimit
             );
             ConnectionConfig cfg = registry.Get(connection);
 

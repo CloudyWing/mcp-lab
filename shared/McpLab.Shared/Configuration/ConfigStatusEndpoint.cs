@@ -84,6 +84,16 @@ public static class ConfigStatusEndpoint {
             }),
             connections_loaded_at = status?.LoadedAt,
             limits = limits?.Invoke(services),
+            settings = ServiceSettings.ForService(serviceName).Select(setting => new {
+                name = setting.Name,
+                description = setting.Description,
+                unit = setting.Unit,
+                default_value = setting.DefaultValue,
+                min = setting.Min,
+                max = setting.Max,
+                fallbacks = setting.Fallbacks ?? [],
+                effective = snapshot is null ? setting.DefaultValue : setting.Read(snapshot.Current),
+            }),
             schema = status is null ? null : DescribeSchema(status.Schema),
         };
     }

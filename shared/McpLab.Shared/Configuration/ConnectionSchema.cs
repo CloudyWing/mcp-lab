@@ -16,6 +16,9 @@ public enum ConnectionFieldKind {
     /// <summary>Integer zero or greater.</summary>
     NonNegativeInt,
 
+    /// <summary>Integer one or greater.</summary>
+    PositiveInt,
+
     /// <summary>true or false.</summary>
     Bool,
 

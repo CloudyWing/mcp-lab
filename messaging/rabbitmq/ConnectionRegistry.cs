@@ -1,4 +1,3 @@
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +14,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
 
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ConnectionRegistryCore<ConnectionConfig> core;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -32,6 +32,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
         ArgumentNullException.ThrowIfNull(logger);
 
         this.httpClientFactory = httpClientFactory;
+        this.snapshotProvider = snapshotProvider;
         core = new(ConnectionSchemas.RabbitMq, snapshotProvider, logger, BuildConfig);
     }
 
@@ -54,6 +55,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     public HttpClient CreateClient(string? connectionName) {
         ConnectionConfig cfg = Get(connectionName);
         HttpClient http = httpClientFactory.CreateClient(ClientKey);
+        http.Timeout = ServiceSettings.RabbitMq.HttpTimeout.ReadSeconds(snapshotProvider.Current);
         http.BaseAddress = new Uri($"http://{cfg.Host}:{cfg.MgmtPort}/");
 
         string creds = Convert.ToBase64String(

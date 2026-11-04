@@ -10,6 +10,7 @@ import json
 import os
 import re
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -96,60 +97,108 @@ def _setting_float(names: list[str], default: float, minimum: float, maximum: fl
     return min(parsed, maximum)
 
 
+@dataclass(frozen=True)
+class ReaderSetting:
+    """Reader 的 runtime 設定定義；max_value 可指向另一個設定名稱，表示上限由該設定決定。"""
+
+    name: str
+    description: str
+    unit: str
+    default_value: float
+    min_value: float
+    max_value: float | str
+    fallbacks: tuple[str, ...] = ()
+    is_float: bool = False
+
+
+READER_SETTINGS: dict[str, ReaderSetting] = {
+    setting.name: setting
+    for setting in (
+        ReaderSetting("DOCUMENT_MAX_IMAGES", "單一文件最多回傳的圖片數", "images", 20, 1, 200, ("MAX_IMAGES",)),
+        ReaderSetting("DOCUMENT_MAX_TEXT_MB", "文字檔讀取上限，0 表示不限制", "MB", 10, 0, 1024, ("MAX_TEXT_MB",), True),
+        ReaderSetting("DOCUMENT_LIST_MAX_LIMIT", "list_documents 可要求的筆數上限", "files", 1000, 1, 100000),
+        ReaderSetting("DOCUMENT_LIST_DEFAULT_LIMIT", "list_documents 預設筆數", "files", 100, 1, "DOCUMENT_LIST_MAX_LIMIT"),
+        ReaderSetting("DOCUMENT_LIST_MAX_DEPTH", "list_documents 可要求的遞迴深度上限", "levels", 10, 0, 100),
+        ReaderSetting("DOCUMENT_LIST_DEFAULT_DEPTH", "list_documents 預設遞迴深度", "levels", 2, 0, "DOCUMENT_LIST_MAX_DEPTH"),
+        ReaderSetting("DOCUMENT_SEARCH_MAX_LIMIT", "search_documents 可要求的結果上限", "results", 200, 1, 100000),
+        ReaderSetting("DOCUMENT_SEARCH_DEFAULT_LIMIT", "search_documents 預設結果數", "results", 20, 1, "DOCUMENT_SEARCH_MAX_LIMIT"),
+        ReaderSetting("DOCUMENT_SEARCH_MAX_SCAN_LIMIT", "search_documents 可要求的掃描檔案上限", "files", 2000, 1, 1000000),
+        ReaderSetting("DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT", "search_documents 預設掃描檔案數", "files", 200, 1, "DOCUMENT_SEARCH_MAX_SCAN_LIMIT"),
+        ReaderSetting("DOCUMENT_XLSX_MAX_ROWS_LIMIT", "XLSX 可要求的列數上限", "rows", 10000, 1, 1000000),
+        ReaderSetting("DOCUMENT_XLSX_MAX_ROWS", "XLSX 預設讀取列數", "rows", 1000, 1, "DOCUMENT_XLSX_MAX_ROWS_LIMIT"),
+        ReaderSetting("DOCUMENT_XLSX_MAX_CELLS_LIMIT", "XLSX 可要求的儲存格上限", "cells", 200000, 1, 10000000),
+        ReaderSetting("DOCUMENT_XLSX_MAX_CELLS", "XLSX 預設讀取儲存格數", "cells", 20000, 1, "DOCUMENT_XLSX_MAX_CELLS_LIMIT"),
+    )
+}
+
+
+def _setting_max(setting: ReaderSetting) -> float:
+    return _read_setting(setting.max_value) if isinstance(setting.max_value, str) else setting.max_value
+
+
+def _read_setting(name: str) -> float:
+    setting = READER_SETTINGS[name]
+    names = [setting.name, *setting.fallbacks]
+    maximum = _setting_max(setting)
+    if setting.is_float:
+        return _setting_float(names, setting.default_value, setting.min_value, maximum)
+    return _setting_int(names, int(setting.default_value), int(setting.min_value), int(maximum))
+
+
 def _max_images() -> int:
-    return _setting_int(["DOCUMENT_MAX_IMAGES", "MAX_IMAGES"], 20, 1, 200)
+    return _read_setting("DOCUMENT_MAX_IMAGES")
 
 
 def _max_text_mb() -> float:
-    return _setting_float(["DOCUMENT_MAX_TEXT_MB", "MAX_TEXT_MB"], 10, 0, 1024)
+    return _read_setting("DOCUMENT_MAX_TEXT_MB")
 
 
 def _list_max_limit() -> int:
-    return _setting_int(["DOCUMENT_LIST_MAX_LIMIT"], 1000, 1, 100000)
+    return _read_setting("DOCUMENT_LIST_MAX_LIMIT")
 
 
 def _list_default_limit() -> int:
-    return _setting_int(["DOCUMENT_LIST_DEFAULT_LIMIT"], 100, 1, _list_max_limit())
+    return _read_setting("DOCUMENT_LIST_DEFAULT_LIMIT")
 
 
 def _list_max_depth() -> int:
-    return _setting_int(["DOCUMENT_LIST_MAX_DEPTH"], 10, 0, 100)
+    return _read_setting("DOCUMENT_LIST_MAX_DEPTH")
 
 
 def _list_default_depth() -> int:
-    return _setting_int(["DOCUMENT_LIST_DEFAULT_DEPTH"], 2, 0, _list_max_depth())
+    return _read_setting("DOCUMENT_LIST_DEFAULT_DEPTH")
 
 
 def _search_max_limit() -> int:
-    return _setting_int(["DOCUMENT_SEARCH_MAX_LIMIT"], 200, 1, 100000)
+    return _read_setting("DOCUMENT_SEARCH_MAX_LIMIT")
 
 
 def _search_default_limit() -> int:
-    return _setting_int(["DOCUMENT_SEARCH_DEFAULT_LIMIT"], 20, 1, _search_max_limit())
+    return _read_setting("DOCUMENT_SEARCH_DEFAULT_LIMIT")
 
 
 def _search_max_scan_limit() -> int:
-    return _setting_int(["DOCUMENT_SEARCH_MAX_SCAN_LIMIT"], 2000, 1, 1000000)
+    return _read_setting("DOCUMENT_SEARCH_MAX_SCAN_LIMIT")
 
 
 def _search_default_scan_limit() -> int:
-    return _setting_int(["DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT"], 200, 1, _search_max_scan_limit())
+    return _read_setting("DOCUMENT_SEARCH_DEFAULT_SCAN_LIMIT")
 
 
 def _xlsx_max_rows_limit() -> int:
-    return _setting_int(["DOCUMENT_XLSX_MAX_ROWS_LIMIT"], 10000, 1, 1000000)
+    return _read_setting("DOCUMENT_XLSX_MAX_ROWS_LIMIT")
 
 
 def _xlsx_default_max_rows() -> int:
-    return _setting_int(["DOCUMENT_XLSX_MAX_ROWS"], 1000, 1, _xlsx_max_rows_limit())
+    return _read_setting("DOCUMENT_XLSX_MAX_ROWS")
 
 
 def _xlsx_max_cells_limit() -> int:
-    return _setting_int(["DOCUMENT_XLSX_MAX_CELLS_LIMIT"], 200000, 1, 10000000)
+    return _read_setting("DOCUMENT_XLSX_MAX_CELLS_LIMIT")
 
 
 def _xlsx_default_max_cells() -> int:
-    return _setting_int(["DOCUMENT_XLSX_MAX_CELLS"], 20000, 1, _xlsx_max_cells_limit())
+    return _read_setting("DOCUMENT_XLSX_MAX_CELLS")
 
 
 def _map_host_path(source_path: str) -> Path | None:
@@ -579,6 +628,20 @@ def config_status() -> dict:
         "ignored_settings": None,
         "connections_loaded_at": None,
         "limits": list_runtime_limits(),
+        "settings": [
+            {
+                "name": setting.name,
+                "description": setting.description,
+                "unit": setting.unit,
+                "default_value": setting.default_value,
+                "min": setting.min_value,
+                "max": _setting_max(setting),
+                "max_from": setting.max_value if isinstance(setting.max_value, str) else None,
+                "fallbacks": list(setting.fallbacks),
+                "effective": _read_setting(setting.name),
+            }
+            for setting in READER_SETTINGS.values()
+        ],
         "schema": None,
     }
 

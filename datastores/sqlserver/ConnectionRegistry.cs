@@ -1,4 +1,3 @@
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -46,8 +45,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             UserID = cfg.User,
             Password = cfg.Password,
             InitialCatalog = db,
-            TrustServerCertificate = true,
-            ConnectTimeout = 30,
+            TrustServerCertificate = cfg.TrustServerCertificate,
+            ConnectTimeout = cfg.ConnectTimeoutSeconds,
         }.ConnectionString;
         SqlConnection conn = new(cs);
         conn.Open();
@@ -64,6 +63,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             Port: values.GetInt("PORT"),
             User: values.GetString("USER"),
             Password: values.GetString("PASSWORD"),
-            Database: values.GetString("DATABASE")
+            Database: values.GetString("DATABASE"),
+            TrustServerCertificate: values.GetBool("TRUST_SERVER_CERTIFICATE"),
+            ConnectTimeoutSeconds: values.GetInt("CONNECT_TIMEOUT")
         );
 }

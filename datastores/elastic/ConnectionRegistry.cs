@@ -1,4 +1,3 @@
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +19,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
 
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ConnectionRegistryCore<ConnectionConfig> core;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -37,6 +37,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
         ArgumentNullException.ThrowIfNull(logger);
 
         this.httpClientFactory = httpClientFactory;
+        this.snapshotProvider = snapshotProvider;
         core = new(ConnectionSchemas.Elasticsearch, snapshotProvider, logger, BuildConfig);
     }
 
@@ -60,6 +61,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
         ConnectionConfig cfg = Get(connectionName);
         string clientKey = cfg.SslSkipVerify ? SslSkipClientKey : PlainClientKey;
         HttpClient http = httpClientFactory.CreateClient(clientKey);
+        http.Timeout = ServiceSettings.Elasticsearch.HttpTimeout.ReadSeconds(snapshotProvider.Current);
 
         http.BaseAddress = new Uri(cfg.Url.TrimEnd('/') + "/");
 

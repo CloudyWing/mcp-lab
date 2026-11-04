@@ -20,6 +20,8 @@ internal sealed class ConnectionSettingsParserTests {
             Assert.That(values.Name, Is.EqualTo("prod"));
             Assert.That(values.GetInt("PORT"), Is.EqualTo(1433));
             Assert.That(values.GetString("DATABASE"), Is.EqualTo("master"));
+            Assert.That(values.GetBool("TRUST_SERVER_CERTIFICATE"), Is.True);
+            Assert.That(values.GetInt("CONNECT_TIMEOUT"), Is.EqualTo(30));
             Assert.That(result.Rejected, Is.Empty);
         });
     }
@@ -35,6 +37,17 @@ internal sealed class ConnectionSettingsParserTests {
             Assert.That(values.GetString("PASSWORD"), Is.Empty);
             Assert.That(values.GetInt("DATABASE"), Is.Zero);
         });
+    }
+
+    [TestCase("0")]
+    [TestCase("-5")]
+    public void Parse_NonPositiveTimeout_RejectsWithReason(string timeout) {
+        ConnectionParseResult result = Parse(ConnectionSchemas.Redis, new() {
+            ["REDIS_CONN_LAB_HOST"] = "redis",
+            ["REDIS_CONN_LAB_OPERATION_TIMEOUT"] = timeout,
+        });
+
+        Assert.That(result.Rejected.Single().Errors.Single(), Does.Contain("REDIS_CONN_LAB_OPERATION_TIMEOUT must be an integer of 1 or greater"));
     }
 
     [Test]

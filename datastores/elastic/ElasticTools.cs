@@ -7,8 +7,7 @@ namespace CloudyWing.McpLab.Elastic;
 /// </summary>
 [McpServerToolType]
 public sealed class ElasticTools {
-    private const int DefaultSearchSize = 10;
-    private const int MaxSearchSize = 1000;
+    private static readonly int MaxSearchSize = ServiceSettings.Elasticsearch.SearchSize.Max;
     private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
     private static readonly string[] Value = ["*"];
     private readonly ConnectionRegistry registry;
@@ -27,14 +26,7 @@ public sealed class ElasticTools {
         this.snapshotProvider = snapshotProvider;
     }
 
-    private int SearchSize =>
-        ToolRuntimeOptions.GetSnapshotInt32(
-            snapshotProvider.Current,
-            ["ES_SEARCH_SIZE", "MAX_ROWS"],
-            DefaultSearchSize,
-            1,
-            MaxSearchSize
-        );
+    private int SearchSize => ServiceSettings.Elasticsearch.SearchSize.Read(snapshotProvider.Current);
 
     /// <summary>
     /// 列出所有已設定的 Elasticsearch 連線

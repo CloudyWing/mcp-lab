@@ -12,6 +12,7 @@
 | `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `config/<服務>/service.env` |
 | `MCPLAB_MCP_TOKEN` | runtime | MCP endpoint 的 Bearer token；留空則不檢查 |
 | `*_MAX_CELL_CHARS` | runtime | SQL Server 與 Oracle 單一欄位回傳字元上限 |
+| `*_HTTP_TIMEOUT`、`API_CONTRACT_*_BODY_BYTES` | runtime | HTTP 逾時與 API Contract 回應大小上限 |
 | `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
 | `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
 | `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
@@ -73,6 +74,18 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `ORACLE_MAX_CELL_CHARS` | `4000` | Oracle 單一欄位回傳字元上限，允許 1 到 100000 |
 | `ES_SEARCH_SIZE` | `10` | Elasticsearch 搜尋預設回傳筆數，允許 1 到 1000 |
 
+## HTTP 逾時與回應上限
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `ES_HTTP_TIMEOUT` | `30` | Elasticsearch HTTP 逾時秒數，允許 1 到 300 |
+| `API_CONTRACT_HTTP_TIMEOUT` | `15` | API Contract HTTP 逾時秒數，允許 1 到 300 |
+| `OIDC_HTTP_TIMEOUT` | `10` | OIDC discovery 與 JWKS 的 HTTP 逾時秒數，允許 1 到 300 |
+| `RABBITMQ_HTTP_TIMEOUT` | `10` | RabbitMQ Management API 的 HTTP 逾時秒數，允許 1 到 300 |
+| `MAILPIT_HTTP_TIMEOUT` | `10` | Mailpit API 的 HTTP 逾時秒數，允許 1 到 300 |
+| `API_CONTRACT_DEFAULT_BODY_BYTES` | `50000` | `invoke_endpoint` 預設回傳的 body 位元組數，不超過 `API_CONTRACT_MAX_BODY_BYTES` |
+| `API_CONTRACT_MAX_BODY_BYTES` | `200000` | `invoke_endpoint` 可要求的 body 位元組上限，允許 1 到 10000000 |
+
 ## 本機整合測試
 
 | 變數 | 預設值 | 說明 |
@@ -93,7 +106,9 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `MSSQL_CONN_PROD_PORT` | `1433` | 連線埠 |
 | `MSSQL_CONN_PROD_USER` | `` | 使用者帳號 |
 | `MSSQL_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
-| `MSSQL_CONN_PROD_DATABASE` | `` | 預設資料庫 |
+| `MSSQL_CONN_PROD_DATABASE` | `master` | 預設資料庫 |
+| `MSSQL_CONN_PROD_TRUST_SERVER_CERTIFICATE` | `true` | 信任伺服器憑證而不驗證；連線到已設定正式憑證的伺服器時建議設為 `false` |
+| `MSSQL_CONN_PROD_CONNECT_TIMEOUT` | `30` | 建立連線的逾時秒數 |
 
 ## API Contract 連線
 
@@ -145,8 +160,10 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `REDIS_CONN_PROD_NAME` | `` | 連線名稱 |
 | `REDIS_CONN_PROD_HOST` | `` | 主機位址 |
 | `REDIS_CONN_PROD_PORT` | `6379` | 連線埠 |
-| `REDIS_CONN_PROD_DATABASE` | `` | 預設資料庫 |
+| `REDIS_CONN_PROD_DATABASE` | `0` | 預設資料庫編號 |
 | `REDIS_CONN_PROD_PASSWORD` | `` | 使用者密碼 |
+| `REDIS_CONN_PROD_CONNECT_TIMEOUT` | `5` | 建立連線的逾時秒數 |
+| `REDIS_CONN_PROD_OPERATION_TIMEOUT` | `10` | 單一指令的逾時秒數 |
 
 ## OIDC 連線
 

@@ -1,4 +1,3 @@
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +19,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
 
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ConnectionRegistryCore<ConnectionConfig> core;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ConnectionRegistry"/>.
@@ -37,6 +37,7 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
         ArgumentNullException.ThrowIfNull(logger);
 
         this.httpClientFactory = httpClientFactory;
+        this.snapshotProvider = snapshotProvider;
         core = new(ConnectionSchemas.ApiContract, snapshotProvider, logger, BuildConfig);
     }
 
@@ -56,8 +57,12 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     /// <summary>
     /// Creates an <see cref="HttpClient"/> for the specified profile.
     /// </summary>
-    public HttpClient CreateClient(ConnectionConfig cfg) =>
-        httpClientFactory.CreateClient(cfg.SslSkipVerify ? SslSkipClientKey : PlainClientKey);
+    public HttpClient CreateClient(ConnectionConfig cfg) {
+        HttpClient http = httpClientFactory.CreateClient(cfg.SslSkipVerify ? SslSkipClientKey : PlainClientKey);
+        http.Timeout = ServiceSettings.ApiContract.HttpTimeout.ReadSeconds(snapshotProvider.Current);
+
+        return http;
+    }
 
     /// <inheritdoc />
     public void Dispose() => core.Dispose();

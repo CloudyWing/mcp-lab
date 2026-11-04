@@ -1,6 +1,5 @@
 using CloudyWing.McpLab.ApiContract;
 using CloudyWing.McpLab.Shared;
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 
 string port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -15,7 +14,6 @@ builder.Services.AddHttpClient(ConnectionRegistry.PlainClientKey)
         AllowAutoRedirect = false,
     })
     .ConfigureHttpClient(c => {
-        c.Timeout = TimeSpan.FromSeconds(15);
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     });
 builder.Services.AddHttpClient(ConnectionRegistry.SslSkipClientKey)
@@ -25,7 +23,6 @@ builder.Services.AddHttpClient(ConnectionRegistry.SslSkipClientKey)
             HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
     })
     .ConfigureHttpClient(c => {
-        c.Timeout = TimeSpan.FromSeconds(15);
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     });
 builder.Services

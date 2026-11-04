@@ -7,10 +7,6 @@ namespace CloudyWing.McpLab.SqlServer;
 /// </summary>
 [McpServerToolType]
 public sealed class SqlServerTools {
-    private const int DefaultQueryTimeoutSeconds = 60;
-    private const int MaxQueryTimeoutSeconds = 300;
-    private const int DefaultMaxRows = 500;
-    private const int MaxResultRows = 5000;
     private readonly ConnectionRegistry registry;
     private readonly IDotEnvSnapshotProvider snapshotProvider;
 
@@ -27,32 +23,11 @@ public sealed class SqlServerTools {
         this.snapshotProvider = snapshotProvider;
     }
 
-    private int QueryTimeout =>
-        ToolRuntimeOptions.GetSnapshotInt32(
-            snapshotProvider.Current,
-            ["MSSQL_QUERY_TIMEOUT", "QUERY_TIMEOUT"],
-            DefaultQueryTimeoutSeconds,
-            1,
-            MaxQueryTimeoutSeconds
-        );
+    private int QueryTimeout => ServiceSettings.SqlServer.QueryTimeout.Read(snapshotProvider.Current);
 
-    private int MaxCellChars =>
-        ToolRuntimeOptions.GetSnapshotInt32(
-            snapshotProvider.Current,
-            ["MSSQL_MAX_CELL_CHARS"],
-            SqlResultSetReader.DefaultMaxCellChars,
-            1,
-            SqlResultSetReader.MaxCellCharsLimit
-        );
+    private int MaxCellChars => ServiceSettings.SqlServer.MaxCellChars.Read(snapshotProvider.Current);
 
-    private int MaxRows =>
-        ToolRuntimeOptions.GetSnapshotInt32(
-            snapshotProvider.Current,
-            ["MSSQL_MAX_ROWS", "MAX_ROWS"],
-            DefaultMaxRows,
-            1,
-            MaxResultRows
-        );
+    private int MaxRows => ServiceSettings.SqlServer.MaxRows.Read(snapshotProvider.Current);
 
     /// <summary>
     /// 列出所有已設定的 SQL Server 連線

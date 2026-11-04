@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.Oidc;
 
 /// <summary>
@@ -5,12 +7,16 @@ namespace CloudyWing.McpLab.Oidc;
 /// </summary>
 public sealed class OidcDocumentClient {
     private readonly IHttpClientFactory httpClientFactory;
+    private readonly IDotEnvSnapshotProvider? snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="OidcDocumentClient"/>.
     /// </summary>
-    public OidcDocumentClient(IHttpClientFactory httpClientFactory) {
+    /// <param name="httpClientFactory">The HTTP client factory.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider used to read OIDC_HTTP_TIMEOUT.</param>
+    public OidcDocumentClient(IHttpClientFactory httpClientFactory, IDotEnvSnapshotProvider? snapshotProvider = null) {
         this.httpClientFactory = httpClientFactory;
+        this.snapshotProvider = snapshotProvider;
     }
 
     /// <summary>
@@ -46,6 +52,7 @@ public sealed class OidcDocumentClient {
 
     private async Task<string> GetStringAsync(string url) {
         using HttpClient http = httpClientFactory.CreateClient(ConnectionRegistry.ClientKey);
+        http.Timeout = ServiceSettings.Oidc.HttpTimeout.ReadSeconds(snapshotProvider?.Current ?? new Dictionary<string, string>());
         using HttpResponseMessage response = await http.GetAsync(url).ConfigureAwait(false);
         string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 

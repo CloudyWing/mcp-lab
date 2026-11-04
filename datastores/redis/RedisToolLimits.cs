@@ -6,8 +6,7 @@ namespace CloudyWing.McpLab.Redis;
 /// Provides bounded input rules for Redis MCP tools.
 /// </summary>
 public sealed class RedisToolLimits {
-    private const int DefaultKeyCount = 100;
-    private const int MaxKeyCount = 1000;
+    private static readonly int MaxKeyCount = ServiceSettings.Redis.MaxRows.Max;
     private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
@@ -22,14 +21,7 @@ public sealed class RedisToolLimits {
     /// <summary>
     /// Gets the configured default key count.
     /// </summary>
-    public int KeyCount =>
-        ToolRuntimeOptions.GetSnapshotInt32(
-            snapshotProvider.Current,
-            ["REDIS_MAX_ROWS", "MAX_ROWS"],
-            DefaultKeyCount,
-            1,
-            MaxKeyCount
-        );
+    public int KeyCount => ServiceSettings.Redis.MaxRows.Read(snapshotProvider.Current);
 
     /// <summary>
     /// Normalizes the requested Redis key enumeration count.

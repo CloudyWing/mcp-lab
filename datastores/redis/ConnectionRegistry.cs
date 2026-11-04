@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using CloudyWing.McpLab.Shared.Configuration;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.Extensions.Logging;
 
@@ -79,8 +78,9 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
     private static async Task<IConnectionMultiplexer> CreateMultiplexerAsync(ConnectionConfig cfg) {
         ConfigurationOptions options = new() {
             EndPoints = { { cfg.Host, cfg.Port } },
-            ConnectTimeout = 5000,
-            AsyncTimeout = 10000,
+            ConnectTimeout = cfg.ConnectTimeoutSeconds * 1000,
+            AsyncTimeout = cfg.OperationTimeoutSeconds * 1000,
+            SyncTimeout = cfg.OperationTimeoutSeconds * 1000,
             DefaultDatabase = cfg.Database,
         };
 
@@ -119,6 +119,8 @@ public sealed class ConnectionRegistry : IConnectionStatusSource, IDisposable {
             Host: values.GetString("HOST"),
             Port: values.GetInt("PORT"),
             Password: values.GetString("PASSWORD"),
-            Database: values.GetInt("DATABASE")
+            Database: values.GetInt("DATABASE"),
+            ConnectTimeoutSeconds: values.GetInt("CONNECT_TIMEOUT"),
+            OperationTimeoutSeconds: values.GetInt("OPERATION_TIMEOUT")
         );
 }
