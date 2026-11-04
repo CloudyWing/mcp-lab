@@ -53,6 +53,7 @@ def prepare(args: argparse.Namespace) -> None:
         "MCP_SMOKE_MAILPIT_SMTP_HOST=127.0.0.1",
         "MCP_SMOKE_MAILPIT_SMTP_PORT=1025",
         "MCP_SMOKE_READER_SAMPLES=.",
+        "MCP_SMOKE_TEST_BACKENDS=1",
         *args.env,
     ]
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -63,8 +64,25 @@ def prepare(args: argparse.Namespace) -> None:
         shutil.copyfile(source, target)
         target.chmod(0o600)
 
+    make_certificate()
+
     # Start from an empty admin history so the end-to-end test sees only its own changes.
     shutil.rmtree(CONFIG_ROOT / ".admin", ignore_errors=True)
+
+
+def make_certificate() -> None:
+    """Creates the self-signed certificate that the TLS listeners of the test brokers use."""
+    certs = TEST_ROOT / ".certs"
+    certs.mkdir(exist_ok=True)
+    run([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+        "-subj", "/CN=mcp-lab-test",
+        "-addext", "subjectAltName=DNS:test-redis,DNS:test-mqtt,DNS:test-rabbit",
+        "-keyout", str(certs / "server.key"), "-out", str(certs / "server.crt"),
+    ], capture_output=True)
+    # The brokers run as their own users; the key is throwaway, so let them read it.
+    for path in certs.iterdir():
+        path.chmod(0o644)
 
 
 def main() -> int:

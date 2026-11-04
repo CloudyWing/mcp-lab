@@ -35,7 +35,12 @@ services:
 
   test-redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--requirepass", "labpass"]
+    # Port 6380 serves TLS with the self-signed certificate that run.py generates.
+    command: ["redis-server", "--requirepass", "labpass", "--tls-port", "6380",
+              "--tls-cert-file", "/certs/server.crt", "--tls-key-file", "/certs/server.key",
+              "--tls-ca-cert-file", "/certs/server.crt", "--tls-auth-clients", "no"]
+    volumes:
+      - ./tests/integration/.certs:/certs:ro
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "labpass", "--no-auth-warning", "ping"]
       interval: 3s
@@ -48,6 +53,7 @@ services:
     image: eclipse-mosquitto:2
     volumes:
       - ./tests/integration/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./tests/integration/.certs:/certs:ro
     healthcheck:
       test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "health", "-m", "ok"]
       interval: 3s
@@ -61,6 +67,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: lab
       RABBITMQ_DEFAULT_PASS: labpass
+    volumes:
+      # Adds an HTTPS Management API listener on 15671 next to the plain one.
+      - ./tests/integration/rabbitmq-tls.conf:/etc/rabbitmq/conf.d/90-tls.conf:ro
+      - ./tests/integration/.certs:/certs:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
@@ -84,6 +94,10 @@ services:
     command: ["python", "-u", "/app/fake_api.py"]
     volumes:
       - ./tests/integration/fake_api.py:/app/fake_api.py:ro
+      - ./tests/integration/oidc-test-key.json:/app/oidc-test-key.json:ro
+    ports:
+      # The smoke test reads /stats from the host to check the OIDC metadata cache.
+      - "127.0.0.1:18000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json')"]
       interval: 3s

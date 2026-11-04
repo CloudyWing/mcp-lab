@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -286,6 +287,18 @@ def main() -> int:
     runner.check(
         "Reader MCP parses PDF, Office, image and text samples",
         lambda: check_reader_samples(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
+        "API Contract MCP reports redirects without following them",
+        lambda: check_api_contract_redirect(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
+        "OIDC MCP validates signatures and caches provider metadata",
+        lambda: check_oidc_validation(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
+        "Redis, MQTT and RabbitMQ connect over TLS",
+        lambda: check_tls_connections(status_by_service, args.timeout_seconds),
     )
     runner.check(
         "Docker MCP can inspect compose containers",
@@ -640,6 +653,94 @@ def check_oidc_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds
     data = response.get("data") or {}
     assert_contains(json.dumps(data), "https://issuer.example.test")
     assert_contains(json.dumps(data), "subject-1")
+
+
+TEST_ROOT = REPO_ROOT / "tests" / "integration"
+TEST_API_STATS_URL = "http://127.0.0.1:18000/stats"
+
+
+def require_test_backends() -> None:
+    if not is_truthy(read_setting("MCP_SMOKE_TEST_BACKENDS")):
+        raise SkipCheck("needs the test backends from tests/integration (set MCP_SMOKE_TEST_BACKENDS=1)")
+
+
+def check_api_contract_redirect(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    require_test_backends()
+    client = create_client(status_by_service, "mcp-api-contract", timeout_seconds)
+    data = expect_tool_ok(client.call_tool("invoke_endpoint", {"path": "/redirect", "connection": "LAB"})).get("data") or {}
+
+    if data.get("status_code") != 302:
+        raise SmokeError(f"invoke_endpoint followed or lost the redirect: {data}")
+
+    if not str(data.get("redirect_location", "")).endswith("/items"):
+        raise SmokeError(f"invoke_endpoint did not report the redirect location: {data}")
+
+
+def sign_test_jwt(payload: dict[str, Any], kid: str) -> str:
+    """Signs an RS256 JWT with the throwaway key in tests/integration/oidc-test-key.json."""
+    key = json.loads((TEST_ROOT / "oidc-test-key.json").read_text(encoding="utf-8"))
+
+    def to_int(value: str) -> int:
+        return int.from_bytes(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)), "big")
+
+    n, d = to_int(key["n"]), to_int(key["d"])
+    signing_input = f"{base64url_json({'alg': 'RS256', 'typ': 'JWT', 'kid': kid})}.{base64url_json(payload)}"
+    # EMSA-PKCS1-v1_5 encoding of the SHA-256 digest (RFC 8017, section 9.2).
+    digest_info = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(signing_input.encode()).digest()
+    size = (n.bit_length() + 7) // 8
+    encoded = b"\x00\x01" + b"\xff" * (size - len(digest_info) - 3) + b"\x00" + digest_info
+    signature = pow(int.from_bytes(encoded, "big"), d, n).to_bytes(size, "big")
+    return f"{signing_input}.{base64.urlsafe_b64encode(signature).decode('ascii').rstrip('=')}"
+
+
+def read_test_api_stats() -> dict[str, int]:
+    with urllib.request.urlopen(TEST_API_STATS_URL, timeout=5) as response:
+        return json.loads(response.read())
+
+
+def check_oidc_validation(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    require_test_backends()
+    client = create_client(status_by_service, "mcp-oidc", timeout_seconds)
+    now = int(time.time())
+    claims = {"iss": "http://test-api:8000", "sub": "smoke", "iat": now, "exp": now + 600}
+
+    def validate(token: str) -> dict[str, Any]:
+        return parse_tool_response(client.call_tool("validate_jwt", {"token": token, "connection": "LAB"}))
+
+    valid = validate(sign_test_jwt(claims, "test-key"))
+    if valid.get("ok") is not True or (valid.get("data") or {}).get("valid") is not True:
+        raise SmokeError(f"validate_jwt rejected a correctly signed token: {valid}")
+
+    tampered = sign_test_jwt(claims, "test-key").rsplit(".", 1)[0] + "." + base64url_json({"forged": True})
+    if (validate(tampered).get("data") or {}).get("valid") is True:
+        raise SmokeError("validate_jwt accepted a token with a forged signature.")
+
+    expired = validate(sign_test_jwt({**claims, "exp": now - 3600}, "test-key"))
+    if (expired.get("data") or {}).get("valid") is True:
+        raise SmokeError("validate_jwt accepted an expired token.")
+
+    before = read_test_api_stats().get("/jwks", 0)
+    validate(sign_test_jwt(claims, "test-key"))
+    if read_test_api_stats().get("/jwks", 0) != before:
+        raise SmokeError("validate_jwt fetched the JWKS again although the key id is cached.")
+
+    validate(sign_test_jwt(claims, "rotated-key"))
+    if read_test_api_stats().get("/jwks", 0) != before + 1:
+        raise SmokeError("validate_jwt did not refetch the JWKS once for an unknown key id.")
+
+
+def check_tls_connections(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    require_test_backends()
+    for service in ("mcp-redis", "mcp-mosquitto", "mcp-rabbitmq"):
+        client = create_client(status_by_service, service, timeout_seconds)
+        tls = parse_tool_response(client.call_tool("ping_connection", {"connection": "TLS"}))
+        if tls.get("ok") is not True:
+            raise SmokeError(f"{service} could not connect over TLS: {tls.get('message')}")
+
+        # The certificate is self-signed, so a connection that verifies it must fail.
+        strict = parse_tool_response(client.call_tool("ping_connection", {"connection": "STRICT"}))
+        if strict.get("ok") is True:
+            raise SmokeError(f"{service} accepted an untrusted certificate without SSL_SKIP_VERIFY.")
 
 
 def check_ping(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> None:

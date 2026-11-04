@@ -1,0 +1,7 @@
+{
+  "comment": "Throwaway RSA key for integration tests only; fake_api.py serves the public half as JWKS.",
+  "kid": "test-key",
+  "n": "oQF6FleTyUCLYYgJ9w3dMSiXktNSEh9Lz3wpG2Th7vyxW2pqKBWEeW3h7KbmEVKSK3VCaVChmy5RJh9oEuUlD7_tt4BSZEumE2Kbzytm4DKxoQPRCEzqrs3CWd3o4Qw7DAedj1FT9OieFSpSsX2Vy2nBjlHZoF32G-ZlX7gwRNMREP5L2Vzdjne35B2ISUNLPQ6_agWAV2PP2a7EUamUn5vzy2HYqkMDCalf3t_IAOlOyQHGqDeBSaS5N-dl7UjMDRkegcIGR4CfIeUqZMaWHimpkxiEIQSomp7Ni18dnnIwtEWG1aaER-lrr4k7UGi2UQovpD9YPBCx3H78hTeb5w",
+  "e": "AQAB",
+  "d": "Bpjbj8l23MAwSzFvzG0Hqy6mnKAxX1y469TX5QTKh9MC0WQYMBxG7qgkobW_p5C35zVJdgHqcplV6eH6Obaklh30d5hicomcUcmwk1nhP-kpLhfMm4fLS0OoZauaEd6WbMptwk7qycDeTq-1Q7Xe9WltQjpIWIcrwROSWSG1mJxHYgQ3XzHJRg0-qHILajo494oNDyvDn0_51TkIgocJ7gAGzJBiHGsXNSDz7H082briNdiMeW_imS15y0QbUYb6GPkpsaOa-bK1uLX4vAXRzIbCLdo0CDbtMau47esYZqYnZ2iNDPa5Cq-nE8C569sMC0nsHc6ysxx2xMoegWJkAQ"
+}
