@@ -1,0 +1,11 @@
+{
+  "name": "mcp-lab-admin-e2e",
+  "private": true,
+  "description": "End-to-end tests for the MCP Lab admin UI. Run through tests/integration/run.py.",
+  "scripts": {
+    "test": "node admin.e2e.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

@@ -41,3 +41,39 @@ jobs:
 
       - name: Test
         run: python -m unittest discover -s tests -v
+
+  integration:
+    name: Integration (smoke + admin E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        working-directory: tests/admin-e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run integration tests
+        env:
+          MCPLAB_E2E_ARTIFACTS: ${{ runner.temp }}/admin-e2e
+        run: |
+          mkdir -p "$MCPLAB_E2E_ARTIFACTS"
+          python tests/integration/run.py
+
+      - name: Upload E2E screenshots
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: admin-e2e-screenshots
+          path: ${{ runner.temp }}/admin-e2e
+          if-no-files-found: ignore

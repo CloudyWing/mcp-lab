@@ -171,13 +171,32 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:9800/config/status
 
 ## 測試
 
-單元測試不依賴外部服務，可直接執行：
+測試分成四層，前兩層不需要 Docker：
+
+| 層級 | 位置 | 內容 |
+| --- | --- | --- |
+| 單元測試 | `tests/McpLab.Guards.Tests` | Guard、設定解析、Schema、管理介面背後的服務 |
+| 元件測試 | `tests/McpLab.Admin.Tests` | 以 bUnit 渲染管理介面頁面，模擬點擊與輸入 |
+| 整合測試 | `tests/integration` | 啟動整套服務與測試用後端，執行 smoke test |
+| 端到端測試 | `tests/admin-e2e` | 以 Playwright 操作實際運作中的管理介面 |
+
+單元測試與元件測試：
 
 ```bash
 dotnet test
 ```
 
-本機整合 smoke test 需要 Docker Compose 堆疊已啟動，並且 `config/<服務>/service.env` 已指向可連線的測試環境：
+整合測試與端到端測試會用 `tests/integration/compose.test.yml` 啟動 SQL Server、Elasticsearch、Redis、Mosquitto、RabbitMQ、Mailpit 與模擬 OpenAPI／OIDC 的測試服務，再依序執行 smoke test 與管理介面的 E2E。腳本會覆寫根目錄 `.env` 與 `config/<服務>/service.env`，因此已有設定時會拒絕執行，請在乾淨的 checkout 中使用，或加上 `--force`：
+
+```bash
+npm ci --prefix tests/admin-e2e
+npx --prefix tests/admin-e2e playwright install chromium
+python3 tests/integration/run.py
+```
+
+CI 會在每次 push 與 PR 時執行以上四層測試；E2E 失敗時會上傳截圖。
+
+也可以只對自己的環境執行 smoke test，前提是 Docker Compose 堆疊已啟動，並且 `config/<服務>/service.env` 已指向可連線的測試環境：
 
 ```bash
 python3 scripts/smoke-test.py

@@ -1,0 +1,93 @@
+# Backends used by the integration tests (scripts in tests/integration/run.py start them together
+# with the MCP stack). Credentials here are for throwaway test containers only.
+services:
+  test-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Lab_Passw0rd!
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Lab_Passw0rd!' -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - shared_net
+
+  test-es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      ELASTIC_PASSWORD: labpass
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs -u elastic:labpass 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    networks:
+      - shared_net
+
+  test-redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--requirepass", "labpass"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "labpass", "--no-auth-warning", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - shared_net
+
+  test-mqtt:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./tests/integration/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "health", "-m", "ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - shared_net
+
+  test-rabbit:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: lab
+      RABBITMQ_DEFAULT_PASS: labpass
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+    networks:
+      - shared_net
+
+  test-mailpit:
+    image: axllent/mailpit:v1.33.0
+    ports:
+      # The smoke test sends a message through SMTP from the host.
+      - "127.0.0.1:1025:1025"
+    networks:
+      - shared_net
+
+  # Serves an OpenAPI spec for mcp-api-contract and discovery/JWKS documents for mcp-oidc.
+  test-api:
+    image: python:3.12-slim
+    command: ["python", "-u", "/app/fake_api.py"]
+    volumes:
+      - ./tests/integration/fake_api.py:/app/fake_api.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - shared_net
