@@ -83,18 +83,38 @@ docker compose ps
 - 根目錄 `.env` 已有該服務的設定時，從 `.env` 搬移，適用於從舊版升級。
 - 否則從 `config/services.env.example` 範本建立。
 
-從舊版升級時，可加上 `--strip-env`，把已搬移的設定從 `.env` 移除，原檔備份為 `.env.bak`：
-
-```bash
-python3 scripts/init-config.py --strip-env
-docker compose up -d --force-recreate
-```
+從舊版升級時，請參考下方的[從舊版升級](#從舊版升級)。
 
 `mcp-docker` 需要掛載 Docker socket，預設不啟動。需要時以 profile 啟動：
 
 ```bash
 docker compose --profile docker up -d --build
 ```
+
+## 從舊版升級
+
+舊版把所有設定放在根目錄 `.env`。升級時依序執行：
+
+```bash
+git pull
+# 在 .env 加上 MCPLAB_ADMIN_PASSWORD（至少 8 個字元）
+python3 scripts/init-config.py --strip-env
+docker compose up -d --build --force-recreate --remove-orphans
+python3 scripts/smoke-test.py
+```
+
+`--strip-env` 會把各服務的設定從 `.env` 搬到 `config/<服務>/service.env`，並從 `.env` 移除，原檔備份為 `.env.bak`。確認服務正常後再刪除 `.env.bak`，因為裡面仍有帳密。
+
+需要注意的行為變更：
+
+| 項目 | 舊版 | 新版 | 需要的調整 |
+| --- | --- | --- | --- |
+| 設定位置 | 全部在 `.env`，每個容器都讀得到所有帳密 | 連線與查詢限制在 `config/<服務>/service.env`，每個容器只掛載自己的設定 | 執行 `init-config.py --strip-env` |
+| 對外埠 | 綁定所有網路介面 | 預設只綁定 `127.0.0.1` | 其他主機需要連線時，設定 `MCP_BIND_ADDRESS` |
+| 寫入工具 | 省略 `connection` 時使用第一個連線 | SQL Server、Oracle、Elasticsearch、Redis、MQTT、RabbitMQ 的寫入工具必須指定 `connection` | 讓 Agent 先呼叫 `list_connections()`，再帶入連線名稱 |
+| Docker 服務 | 容器直接掛載 Docker socket，需設定 `DOCKER_GID` | 透過只允許讀取的 `mcp-docker-proxy` 存取 Docker | 從 `.env` 移除 `DOCKER_GID` |
+| 設定管理介面 | 無 | `mcp-admin` 綁定 `127.0.0.1:9890` | 設定 `MCPLAB_ADMIN_PASSWORD` |
+| 失敗的工具回應 | 只有 JSON 內的 `ok=false` | 另外設定 MCP 的 `isError` | 依 `isError` 判斷失敗的 client 不需調整 |
 
 ## 設定管理介面
 
@@ -301,6 +321,8 @@ HTTP 逾時與 API Contract 回應上限：
 | `empty` | 工具執行成功，但沒有符合條件的資料 |
 | `blocked` | 輸入被安全規則阻擋 |
 | `error` | 執行失敗或輸入格式錯誤 |
+
+`ok` 為 `false`（`blocked` 或 `error`）時，MCP 回應的 `isError` 也會是 `true`，client 不必解析 JSON 就能判斷失敗。`mcp-reader` 的回應沒有 envelope，結果含 `error` 欄位時同樣會設定 `isError`。
 
 Tool 回應會遮罩常見機密片段，例如 password、token、secret、API key 與 URL userinfo。
 
