@@ -36,6 +36,7 @@
     <Project Path="system/docker/McpLab.Docker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/McpLab.Admin.Tests/McpLab.Admin.Tests.csproj" />
     <Project Path="tests/McpLab.Guards.Tests/McpLab.Guards.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/" />
