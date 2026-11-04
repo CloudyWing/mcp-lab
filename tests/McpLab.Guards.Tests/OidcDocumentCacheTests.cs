@@ -41,6 +41,19 @@ internal sealed class OidcDocumentCacheTests {
     }
 
     [Test]
+    public async Task GetJsonWebKeysAsync_RepeatedForceRefresh_RefetchesOncePerInterval() {
+        CountingHandler handler = new();
+        OidcDocumentClient client = CreateClient(handler, []);
+        await client.GetJsonWebKeysAsync(Config());
+
+        await client.GetJsonWebKeysAsync(Config(), forceRefresh: true);
+        await client.GetJsonWebKeysAsync(Config(), forceRefresh: true);
+        await client.GetJsonWebKeysAsync(Config(), forceRefresh: true);
+
+        Assert.That(handler.Requests, Is.EqualTo(4), "initial load plus one forced refresh");
+    }
+
+    [Test]
     public void NeedsKeyRefresh_UnknownKid_ReturnsTrue() {
         string token = "eyJhbGciOiJSUzI1NiIsImtpZCI6Im5ldyJ9.eyJzdWIiOiIxIn0.c2ln";
         JsonWebKey known = new() { Kid = "old" };

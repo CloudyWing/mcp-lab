@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace CloudyWing.McpLab.Admin.Services;
 
 /// <summary>
@@ -27,6 +29,8 @@ public sealed record ApplyResult(ApplyOutcome Outcome, string Message, IReadOnly
 /// when the service reports a syntax error or a connection that the new file broke.
 /// </summary>
 public sealed class ConfigApplier {
+    // ConfigApplier is scoped per circuit, so saves from different browser tabs share these locks.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SaveLocks = new(StringComparer.Ordinal);
     private readonly ConfigStore store;
     private readonly ServiceStatusClient statusClient;
     private readonly AuditLog? auditLog;
@@ -47,7 +51,16 @@ public sealed class ConfigApplier {
     /// and records <paramref name="action"/> with the outcome in the audit log.
     /// </summary>
     public async Task<ApplyResult> SaveAsync(string service, string content, string action, CancellationToken cancellationToken = default) {
-        ApplyResult result = await SaveCoreAsync(service, content, cancellationToken).ConfigureAwait(false);
+        // Hold the lock through verification and rollback, so a rollback cannot discard another save.
+        SemaphoreSlim gate = SaveLocks.GetOrAdd($"{store.Root}|{service}", _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        ApplyResult result;
+
+        try {
+            result = await SaveCoreAsync(service, content, cancellationToken).ConfigureAwait(false);
+        } finally {
+            gate.Release();
+        }
 
         if (auditLog is not null && result.Message != UnchangedMessage) {
             await auditLog.AppendAsync(new AuditEntry(DateTimeOffset.UtcNow, service, action, result.Outcome, result.Message), cancellationToken).ConfigureAwait(false);
@@ -73,7 +86,7 @@ public sealed class ConfigApplier {
             return new(ApplyOutcome.Unverified, "已儲存，但服務目前沒有回應，無法確認是否生效。", before.Error is null ? [] : [before.Error]);
         }
 
-        ServiceStatus? after = await WaitForReloadAsync(service, savedAt, cancellationToken).ConfigureAwait(false);
+        ServiceStatus? after = await WaitForReloadAsync(service, before.Status, savedAt, cancellationToken).ConfigureAwait(false);
 
         if (after is null) {
             return new(ApplyOutcome.Unverified, "已儲存，但服務沒有在時間內回報重新載入，請稍後查看狀態。", []);
@@ -96,7 +109,8 @@ public sealed class ConfigApplier {
     public static IReadOnlyList<string> FindRegressions(ServiceStatus before, ServiceStatus after) {
         List<string> problems = [];
 
-        if (after.ConfigFile?.LastError is { Length: > 0 } error) {
+        // An error the file already had before the save is not caused by the new content.
+        if (after.ConfigFile?.LastError is { Length: > 0 } error && error != before.ConfigFile?.LastError) {
             problems.Add(error);
         }
 
@@ -117,23 +131,29 @@ public sealed class ConfigApplier {
         return problems;
     }
 
-    private async Task<ServiceStatus?> WaitForReloadAsync(string service, DateTimeOffset savedAt, CancellationToken cancellationToken) {
+    /// <summary>
+    /// Returns whether <paramref name="status"/> reflects a file written at <paramref name="savedAt"/>:
+    /// a successful load newer than the one in <paramref name="before"/>, or a new read error.
+    /// </summary>
+    public static bool HasReloaded(ServiceStatus before, ServiceStatus status, DateTimeOffset savedAt) {
+        DateTimeOffset? previousLoad = before.ConfigFile?.LastLoadedAt;
+        bool newError = status.ConfigFile?.LastError is { Length: > 0 } error && error != before.ConfigFile?.LastError;
+        bool loaded = status.ConfigFile?.LastLoadedAt is { } loadedAt
+            && (previousLoad is null || loadedAt > previousLoad)
+            && loadedAt >= savedAt.AddSeconds(-1)
+            && (status.ConnectionsLoadedAt is null || status.ConnectionsLoadedAt >= savedAt.AddSeconds(-1));
+
+        return newError || loaded;
+    }
+
+    private async Task<ServiceStatus?> WaitForReloadAsync(string service, ServiceStatus before, DateTimeOffset savedAt, CancellationToken cancellationToken) {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + reloadTimeout;
 
         while (DateTimeOffset.UtcNow < deadline) {
             await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken).ConfigureAwait(false);
-            ServiceStatusResult result = await statusClient.GetAsync(service, cancellationToken).ConfigureAwait(false);
-            ServiceStatus? status = result.Status;
+            ServiceStatus? status = (await statusClient.GetAsync(service, cancellationToken).ConfigureAwait(false)).Status;
 
-            if (status is null) {
-                continue;
-            }
-
-            bool fileError = status.ConfigFile?.LastError is { Length: > 0 };
-            bool reloaded = status.ConfigFile?.LastLoadedAt >= savedAt.AddSeconds(-1)
-                && (status.ConnectionsLoadedAt is null || status.ConnectionsLoadedAt >= savedAt.AddSeconds(-1));
-
-            if (fileError || reloaded) {
+            if (status is not null && HasReloaded(before, status, savedAt)) {
                 return status;
             }
         }

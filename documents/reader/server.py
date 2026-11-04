@@ -32,8 +32,17 @@ IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ti
 TEXT_EXTS     = {".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log", ".ini", ".toml", ".html"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTS | IMAGE_EXTS | TEXT_EXTS
 
+_ERROR_SCAN_LIMIT = 64 * 1024
+
+
 def _is_error_payload(text: str) -> bool:
-    """Returns whether a tool's JSON text reports a failure through a top-level "error" field."""
+    """Returns whether a tool's JSON text reports a failure through a top-level "error" field.
+
+    Error results are small, so large results (documents with images) are not parsed a second time.
+    """
+    if len(text) > _ERROR_SCAN_LIMIT and not text.startswith('{"error"'):
+        return False
+
     try:
         payload = json.loads(text)
     except ValueError:

@@ -16,6 +16,7 @@ internal sealed class ToolErrorFlagTests {
     [TestCase("""{"ok":true,"kind":"ok","message":"OK","data":null}""")]
     [TestCase("""{"ok":true,"kind":"empty","message":"none","data":[]}""")]
     [TestCase("""{"ok":false}""")]
+    [TestCase("""{"kind":"error","ok":false}""")]
     [TestCase("""[{"ok":false,"kind":"error"}]""")]
     [TestCase("plain text")]
     [TestCase("{not json")]

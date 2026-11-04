@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Microsoft.Extensions.DependencyInjection;
 
 using ModelContextProtocol.Protocol;
@@ -27,21 +25,10 @@ public static class ToolErrorFlag {
 
     /// <summary>
     /// Returns whether <paramref name="text"/> is a tool response envelope with <c>ok=false</c>.
+    /// <see cref="ToolResponse"/> always writes <c>ok</c> and <c>kind</c> first, so a prefix check is enough
+    /// and large results are not parsed a second time.
     /// </summary>
-    public static bool IsFailureEnvelope(string text) {
-        if (!text.StartsWith('{')) {
-            return false;
-        }
+    public static bool IsFailureEnvelope(string text) => text.StartsWith(FailurePrefix, StringComparison.Ordinal);
 
-        try {
-            using JsonDocument document = JsonDocument.Parse(text);
-            JsonElement root = document.RootElement;
-
-            return root.TryGetProperty("ok", out JsonElement ok)
-                && ok.ValueKind == JsonValueKind.False
-                && root.TryGetProperty("kind", out _);
-        } catch (JsonException) {
-            return false;
-        }
-    }
+    private const string FailurePrefix = "{\"ok\":false,\"kind\":";
 }

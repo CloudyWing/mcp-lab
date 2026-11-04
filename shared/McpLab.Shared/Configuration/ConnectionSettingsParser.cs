@@ -53,10 +53,15 @@ public sealed record IgnoredSetting(string Key, string Reason);
 /// <summary>
 /// Result of parsing connection settings for one service.
 /// </summary>
+/// <param name="Connections">Connections that loaded.</param>
+/// <param name="Rejected">Connections that failed validation.</param>
+/// <param name="Ignored">Variables that were ignored.</param>
+/// <param name="AliasOrder">Aliases of loaded and rejected connections in configuration order.</param>
 public sealed record ConnectionParseResult(
     IReadOnlyList<ConnectionValues> Connections,
     IReadOnlyList<RejectedConnection> Rejected,
-    IReadOnlyList<IgnoredSetting> Ignored
+    IReadOnlyList<IgnoredSetting> Ignored,
+    IReadOnlyList<string>? AliasOrder = null
 );
 
 /// <summary>
@@ -190,7 +195,7 @@ public static partial class ConnectionSettingsParser {
             connections.Add(new ConnectionValues(alias, name, values));
         }
 
-        return new ConnectionParseResult(connections, rejected, ignored);
+        return new ConnectionParseResult(connections, rejected, ignored, aliasOrder);
     }
 
     private static string? ValidateValue(ConnectionFieldKind kind, string value) {

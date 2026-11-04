@@ -200,6 +200,30 @@ internal sealed class AdminConfigTests {
     }
 
     [Test]
+    public void ConfigApplier_HasReloaded_IgnoresErrorThatExistedBeforeTheSave() {
+        DateTimeOffset loadedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        DateTimeOffset savedAt = DateTimeOffset.UtcNow;
+        ServiceStatus before = new() { ConfigFile = new() { Exists = true, LastLoadedAt = loadedAt, LastError = "line 3" } };
+        ServiceStatus stale = new() { ConfigFile = new() { Exists = true, LastLoadedAt = loadedAt, LastError = "line 3" } };
+        ServiceStatus fixedFile = new() { ConfigFile = new() { Exists = true, LastLoadedAt = savedAt.AddMilliseconds(300) } };
+
+        Assert.Multiple(() => {
+            Assert.That(ConfigApplier.HasReloaded(before, stale, savedAt), Is.False);
+            Assert.That(ConfigApplier.HasReloaded(before, fixedFile, savedAt), Is.True);
+            Assert.That(ConfigApplier.FindRegressions(before, stale), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void ConfigApplier_HasReloaded_RequiresALoadNewerThanBefore() {
+        DateTimeOffset savedAt = DateTimeOffset.UtcNow;
+        // A load just before the save falls inside the clock tolerance but is the one already seen.
+        ServiceStatus before = new() { ConfigFile = new() { Exists = true, LastLoadedAt = savedAt.AddMilliseconds(-500) } };
+
+        Assert.That(ConfigApplier.HasReloaded(before, before, savedAt), Is.False);
+    }
+
+    [Test]
     public async Task EnvImporter_Preview_SplitsKeysAndSkipsComposeSettings() {
         ConfigStore store = new(root);
         await store.WriteAsync("mcp-redis", "# existing\nREDIS_MAX_ROWS=50\n");

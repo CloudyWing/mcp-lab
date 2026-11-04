@@ -244,6 +244,30 @@ internal sealed class ConnectionSettingsParserTests {
     }
 
     [Test]
+    public void RegistryCore_FirstConnectionRejected_StaysTheDefault() {
+        MutableSnapshotProvider provider = new(new() {
+            ["MAILPIT_CONN_PROD_URL"] = "http://prod:8025",
+            ["MAILPIT_CONN_TEST_URL"] = "http://test:8025",
+        });
+        using ConnectionRegistryCore<string> core = new(
+            ConnectionSchemas.Mailpit,
+            provider,
+            Substitute.For<ILogger>(),
+            values => values.GetString("URL")
+        );
+
+        provider.Reload(new() {
+            ["MAILPIT_CONN_PROD_URL"] = "not-a-url",
+            ["MAILPIT_CONN_TEST_URL"] = "http://test:8025",
+        });
+
+        Assert.Multiple(() => {
+            Assert.That(core.Get(""), Is.EqualTo("http://prod:8025"));
+            Assert.That(core.All.Keys, Is.EqualTo(new[] { "prod", "test" }));
+        });
+    }
+
+    [Test]
     public void RegistryCore_ConnectionRemovedFromSnapshot_DropsConnection() {
         MutableSnapshotProvider provider = new(new() {
             ["MAILPIT_CONN_LAB_URL"] = "http://mail:8025",

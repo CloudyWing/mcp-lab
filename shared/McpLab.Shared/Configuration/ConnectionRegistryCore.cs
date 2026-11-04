@@ -120,16 +120,18 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
     private void Rebuild(IReadOnlyDictionary<string, string> snapshot) {
         IReadOnlyDictionary<string, TConfig> previous = All;
         IReadOnlyDictionary<string, string> previousEnvironments = Volatile.Read(ref environments);
-        Dictionary<string, string> nextEnvironments = new(StringComparer.OrdinalIgnoreCase);
         ConnectionParseResult parsed = ConnectionSettingsParser.Parse(schema, snapshot);
-        Dictionary<string, TConfig> result = new(StringComparer.OrdinalIgnoreCase);
+        // Entries keyed by alias, so connections kept from the previous load stay in configuration order
+        // and the default (first) connection does not change when one of them is rejected.
+        Dictionary<string, (string Name, TConfig Config, string Environment)> entries = new(StringComparer.Ordinal);
+        HashSet<string> loadedNames = new(StringComparer.OrdinalIgnoreCase);
         List<ConnectionStatus> statuses = [];
         List<RejectedConnection> rejected = [.. parsed.Rejected];
 
         foreach (ConnectionValues values in parsed.Connections) {
             try {
-                result[values.Name] = build(values);
-                nextEnvironments[values.Name] = values.GetString(ConnectionSchema.EnvironmentField);
+                entries[values.Alias] = (values.Name, build(values), values.GetString(ConnectionSchema.EnvironmentField));
+                loadedNames.Add(values.Name);
                 statuses.Add(new ConnectionStatus(values.Alias, values.Name, "loaded", []));
             } catch (InvalidOperationException ex) {
                 rejected.Add(new RejectedConnection(values.Alias, values.Name, [ex.Message]));
@@ -137,10 +139,11 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
         }
 
         foreach (RejectedConnection item in rejected) {
-            bool retained = !result.ContainsKey(item.Name) && previous.TryGetValue(item.Name, out TConfig? previousConfig)
-                && result.TryAdd(item.Name, previousConfig);
-            if (retained && previousEnvironments.TryGetValue(item.Name, out string? previousEnvironment)) {
-                nextEnvironments[item.Name] = previousEnvironment;
+            bool retained = !loadedNames.Contains(item.Name) && previous.TryGetValue(item.Name, out TConfig? previousConfig)
+                && entries.TryAdd(item.Alias, (item.Name, previousConfig, previousEnvironments.GetValueOrDefault(item.Name) ?? ""));
+
+            if (retained) {
+                loadedNames.Add(item.Name);
             }
 
             statuses.Add(new ConnectionStatus(
@@ -154,6 +157,16 @@ public sealed partial class ConnectionRegistryCore<TConfig> : IConnectionStatusS
 
         foreach (IgnoredSetting item in parsed.Ignored) {
             LogSettingIgnored(logger, schema.Service, item.Key, item.Reason);
+        }
+
+        Dictionary<string, TConfig> result = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> nextEnvironments = new(StringComparer.OrdinalIgnoreCase);
+        IEnumerable<string> order = (parsed.AliasOrder ?? []).Concat(entries.Keys).Distinct(StringComparer.Ordinal);
+
+        foreach (string alias in order) {
+            if (entries.TryGetValue(alias, out (string Name, TConfig Config, string Environment) entry) && result.TryAdd(entry.Name, entry.Config)) {
+                nextEnvironments[entry.Name] = entry.Environment;
+            }
         }
 
         Volatile.Write(ref current, result);

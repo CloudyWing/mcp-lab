@@ -725,6 +725,10 @@ def check_oidc_validation(status_by_service: dict[str, dict[str, Any]], timeout_
     if read_test_api_stats().get("/jwks", 0) != before + 1:
         raise SmokeError("validate_jwt did not refetch the JWKS once for an unknown key id.")
 
+    validate(sign_test_jwt(claims, "another-unknown-key"))
+    if read_test_api_stats().get("/jwks", 0) != before + 1:
+        raise SmokeError("validate_jwt refetched the JWKS again right after a forced refresh.")
+
 
 def check_tls_connections(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
     require_test_backends()

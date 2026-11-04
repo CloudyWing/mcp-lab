@@ -108,23 +108,35 @@ def write_private(path: Path, lines: list[str]) -> None:
     os.replace(temp_path, path)
 
 
-def strip_root_env() -> list[str]:
+def strip_root_env() -> tuple[list[str], list[str]]:
+    """Removes service keys from .env, but only those every owning service.env already holds with the same line."""
+    service_lines = {
+        service: {line.strip() for line in parse_lines(CONFIG_ROOT / service / SERVICE_FILE_NAME)}
+        for service in SERVICE_KEYS
+    }
     lines = parse_lines(ROOT_ENV_PATH)
     kept: list[str] = []
     removed: list[str] = []
+    not_migrated: list[str] = []
 
     for line in lines:
         key = line_key(line)
-        if key and is_service_key(key):
+        owners = [service for service in SERVICE_KEYS if key and belongs_to(service, key)]
+
+        if not owners:
+            kept.append(line)
+        elif all(line.strip() in service_lines[service] for service in owners):
             removed.append(key)
         else:
+            # Keep it: a skipped (existing) service.env holds a different value or lacks the key.
+            not_migrated.append(key)
             kept.append(line)
 
     if removed:
         shutil.copy2(ROOT_ENV_PATH, ROOT_ENV_PATH.with_name(".env.bak"))
         write_private(ROOT_ENV_PATH, kept)
 
-    return removed
+    return removed, not_migrated
 
 
 def main() -> int:
@@ -158,8 +170,15 @@ def main() -> int:
             write_private(target, lines)
 
     if args.strip_env and not args.dry_run:
-        removed = strip_root_env()
+        removed, not_migrated = strip_root_env()
         print(f"[strip] removed {len(removed)} service keys from .env (backup: .env.bak)")
+        if not_migrated:
+            print(
+                f"[keep] {len(not_migrated)} keys stay in .env because the existing service.env differs: "
+                + ", ".join(not_migrated[:5])
+                + (" ..." if len(not_migrated) > 5 else "")
+                + ". Move them by hand or rerun with --force."
+            )
 
     return 0
 

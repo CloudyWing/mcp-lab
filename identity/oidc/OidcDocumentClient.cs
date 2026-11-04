@@ -10,7 +10,13 @@ public sealed class OidcDocumentClient {
     private readonly IHttpClientFactory httpClientFactory;
     private readonly IDotEnvSnapshotProvider? snapshotProvider;
     private readonly ConcurrentDictionary<string, (string Body, DateTimeOffset ExpiresAt)> cache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> lastForcedRefresh = new(StringComparer.Ordinal);
     private readonly TimeProvider timeProvider;
+
+    /// <summary>
+    /// Minimum time between forced refreshes of one URL, so tokens with unknown key ids cannot bypass the cache.
+    /// </summary>
+    public static readonly TimeSpan MinForcedRefreshInterval = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Initializes a new instance of <see cref="OidcDocumentClient"/>.
@@ -67,8 +73,19 @@ public sealed class OidcDocumentClient {
         int cacheSeconds = ServiceSettings.Oidc.MetadataCacheSeconds.Read(Settings);
         DateTimeOffset now = timeProvider.GetUtcNow();
 
-        if (!forceRefresh && cacheSeconds > 0 && cache.TryGetValue(url, out (string Body, DateTimeOffset ExpiresAt) cached) && cached.ExpiresAt > now) {
+        bool hasCached = cache.TryGetValue(url, out (string Body, DateTimeOffset ExpiresAt) cached) && cached.ExpiresAt > now;
+
+        if (forceRefresh && hasCached && lastForcedRefresh.TryGetValue(url, out DateTimeOffset lastForced)
+            && now - lastForced < MinForcedRefreshInterval) {
+            forceRefresh = false;
+        }
+
+        if (!forceRefresh && cacheSeconds > 0 && hasCached) {
             return cached.Body;
+        }
+
+        if (forceRefresh) {
+            lastForcedRefresh[url] = now;
         }
 
         string body = await FetchAsync(url).ConfigureAwait(false);
