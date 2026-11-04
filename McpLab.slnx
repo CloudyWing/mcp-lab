@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/admin/">
+    <Project Path="admin/web/McpLab.Admin.csproj" />
+  </Folder>
   <Folder Name="/api/">
     <Project Path="api/contract/McpLab.ApiContract.csproj" />
   </Folder>

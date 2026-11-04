@@ -1,0 +1,171 @@
+@page "/access"
+@attribute [Authorize]
+@inject ConfigStore Store
+@inject ConfigApplier Applier
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>存取權杖 - MCP Lab</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <div class="page-heading">
+        <MudText Typo="Typo.h4">存取權杖</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            設定後，MCP client 必須帶 Authorization: Bearer &lt;token&gt; 才能使用各服務。所有服務使用同一個權杖。
+        </MudText>
+    </div>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">目前狀態</MudText>
+        <MudText Typo="Typo.body1">@StateText</MudText>
+        <div class="table-scroll">
+            <MudSimpleTable Dense="true" Elevation="0">
+                <thead><tr><th>服務</th><th>權杖</th></tr></thead>
+                <tbody>
+                    @foreach ((ManagedService service, string fingerprint) in tokens) {
+                        <tr>
+                            <td>@service.DisplayName</td>
+                            <td>@(fingerprint.Length == 0 ? "未設定" : $"已設定（指紋 {fingerprint}）")</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </div>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">指紋是權杖 SHA-256 的前 8 碼，只用來比對各服務是否一致。</MudText>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">變更權杖</MudText>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">變更後，使用舊權杖的 MCP client 會收到 HTTP 401，請同步更新 client 設定。</MudAlert>
+        <div class="button-row">
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Autorenew" Disabled="busy" OnClick="GenerateAsync">
+                @(busy ? "正在套用到所有服務…" : "產生新權杖並套用到所有服務")
+            </MudButton>
+            <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="busy || tokens.All(item => item.Fingerprint.Length == 0)" OnClick="() => confirmClear = true">停用權杖驗證</MudButton>
+        </div>
+        @if (newToken is not null) {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
+                <MudStack Spacing="2">
+                    <MudText Typo="Typo.body2">新權杖只會顯示這一次，請立即複製到 MCP client 設定：</MudText>
+                    <code class="token-value">@newToken</code>
+                    <div><MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync">複製</MudButton></div>
+                </MudStack>
+            </MudAlert>
+        }
+        @foreach ((string service, ApplyResult result) in results) {
+            <MudAlert Severity="@(result.Outcome == ApplyOutcome.Applied ? Severity.Success : Severity.Warning)" Variant="Variant.Text" Dense="true">
+                @ServiceCatalog.Find(service)?.DisplayName：@result.Message
+            </MudAlert>
+        }
+    </MudPaper>
+</MudStack>
+
+<MudDialog Visible="confirmClear" VisibleChanged="@(visible => confirmClear = visible)" Options="ConfirmOptions" ActionsClass="dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">停用權杖驗證</MudText>
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">停用後，任何能連到本機埠的程式都能使用 MCP 服務。</MudAlert>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Disabled="busy" OnClick="() => confirmClear = false">取消</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="busy" OnClick="ClearAsync">確認停用</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions ConfirmOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+    };
+
+    private List<(ManagedService Service, string Fingerprint)> tokens = [];
+    private readonly List<(string Service, ApplyResult Result)> results = [];
+    private string? newToken;
+    private bool busy;
+    private bool confirmClear;
+
+    private string StateText {
+        get {
+            string[] distinct = [.. tokens.Select(item => item.Fingerprint).Distinct()];
+
+            return distinct switch {
+                [""] => "未啟用：所有服務都沒有設定權杖。",
+                [_] => "已啟用：所有服務使用同一個權杖。",
+                _ => "不一致：部分服務的權杖不同或未設定，請重新產生權杖。",
+            };
+        }
+    }
+
+    protected override void OnInitialized() => Load();
+
+    private void Load() {
+        tokens = [.. ServiceCatalog.All.Select(service => (service, Fingerprint(ReadToken(service.Name))))];
+    }
+
+    private string ReadToken(string service) {
+        try {
+            return EnvFile.Parse(Store.Read(service)).Values.GetValueOrDefault(McpAccessToken.VariableName)?.Trim() ?? "";
+        } catch (FormatException) {
+            return "";
+        }
+    }
+
+    private static string Fingerprint(string token) =>
+        token.Length == 0 ? "" : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token)))[..8].ToLowerInvariant();
+
+    private async Task GenerateAsync() {
+        string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        if (await ApplyAsync(token)) {
+            newToken = token;
+        }
+    }
+
+    private async Task ClearAsync() {
+        confirmClear = false;
+        newToken = null;
+        await ApplyAsync(null);
+    }
+
+    private async Task<bool> ApplyAsync(string? token) {
+        busy = true;
+        results.Clear();
+
+        try {
+            foreach (ManagedService service in ServiceCatalog.All) {
+                EnvFile file;
+
+                try {
+                    file = EnvFile.Parse(Store.Read(service.Name));
+                } catch (FormatException ex) {
+                    results.Add((service.Name, new ApplyResult(ApplyOutcome.RolledBack, $"設定檔語法錯誤，未變更：{ex.Message}", [])));
+                    continue;
+                }
+
+                ConfigEditor.SetSetting(file, McpAccessToken.VariableName, [], token);
+                results.Add((service.Name, await Applier.SaveAsync(service.Name, file.ToString())));
+            }
+
+            bool ok = results.All(item => item.Result.Outcome != ApplyOutcome.RolledBack);
+            Snackbar.Add(ok ? "已套用到所有服務。" : "部分服務沒有套用，請查看下方結果。", ok ? Severity.Success : Severity.Warning);
+
+            return ok;
+        } finally {
+            busy = false;
+            Load();
+        }
+    }
+
+    private async Task CopyAsync() {
+        try {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", newToken);
+            Snackbar.Add("已複製。", Severity.Success);
+        } catch (JSException) {
+            Snackbar.Add("瀏覽器不允許複製，請手動選取權杖。", Severity.Warning);
+        }
+    }
+}

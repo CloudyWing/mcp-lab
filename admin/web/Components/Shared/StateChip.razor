@@ -1,0 +1,34 @@
+<MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="ChipColor" Icon="@ChipIcon">@Label</MudChip>
+
+@code {
+    /// <summary>
+    /// Gets or sets the state: loaded, rejected, rejected_using_previous, empty, unreachable, ok, or problem.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string State { get; set; } = "";
+
+    private string Label => State switch {
+        "loaded" => "已載入",
+        "rejected" => "設定有誤",
+        "rejected_using_previous" => "設定有誤，沿用前一版",
+        "empty" => "空白範本",
+        "unreachable" => "無法連線",
+        "ok" => "正常",
+        "problem" => "需要處理",
+        _ => State,
+    };
+
+    private Color ChipColor => State switch {
+        "loaded" or "ok" => Color.Success,
+        "rejected" or "unreachable" => Color.Error,
+        "rejected_using_previous" or "problem" => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private string ChipIcon => State switch {
+        "loaded" or "ok" => Icons.Material.Filled.CheckCircle,
+        "rejected" or "unreachable" => Icons.Material.Filled.Error,
+        "rejected_using_previous" or "problem" => Icons.Material.Filled.Warning,
+        _ => Icons.Material.Filled.RadioButtonUnchecked,
+    };
+}

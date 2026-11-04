@@ -13,7 +13,7 @@
 | `MCPLAB_MCP_TOKEN` | runtime | MCP endpoint 的 Bearer token；留空則不檢查 |
 | `*_MAX_CELL_CHARS` | runtime | SQL Server 與 Oracle 單一欄位回傳字元上限 |
 | `*_HTTP_TIMEOUT`、`API_CONTRACT_*_BODY_BYTES` | runtime | HTTP 逾時與 API Contract 回應大小上限 |
-| `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
+| `*_TAG`、`MCP_*_PORT`、`MCP_BIND_ADDRESS`、`MCP_ADMIN_BIND_ADDRESS`、`MCPLAB_ADMIN_PASSWORD`、`COMPOSE_PROJECT_NAME`、`TZ` | build-time | 映像標籤、對外 port 與綁定位址、Compose project 與容器時區 |
 | `DOCKER_GID`、`DOCKER_SOCKET_PATH` | build-time | Docker socket 掛載與 group 設定 |
 | `MCP_SMOKE_*` | build-time | smoke test 腳本執行參數，不屬於服務 runtime 設定 |
 
@@ -44,6 +44,14 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `MCP_READER_PORT` | `9840` |  |
 | `MCP_DOCKER_PORT` | `9860` | 僅在 `--profile docker` 啟動 |
 | `MCP_BIND_ADDRESS` | `127.0.0.1` | 所有 MCP 對外埠的綁定位址；改為 `0.0.0.0` 會對所有網路介面開放 |
+
+## 設定管理介面
+
+| 變數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `MCP_ADMIN_PORT` | `9890` | 設定管理介面的對外埠 |
+| `MCP_ADMIN_BIND_ADDRESS` | `127.0.0.1` | 設定管理介面的綁定位址，獨立於 `MCP_BIND_ADDRESS` |
+| `MCPLAB_ADMIN_PASSWORD` | `` | 管理密碼，至少 8 個字元；未設定時無法登入。修改後需重新建立 `mcp-admin` 容器 |
 
 ## 存取控制
 

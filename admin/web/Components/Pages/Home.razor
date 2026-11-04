@@ -1,0 +1,87 @@
+@page "/"
+@attribute [Authorize]
+@inject ServiceStatusClient StatusClient
+
+<PageTitle>總覽 - MCP Lab</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <div class="page-heading-row">
+        <div class="page-heading">
+            <MudText Typo="Typo.h4">總覽</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">各服務實際載入的設定狀態。修改設定後不需要重啟容器。</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="loading" OnClick="LoadAsync">重新整理</MudButton>
+    </div>
+    @if (loading && results.Count == 0) {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    <div class="service-grid">
+        @foreach (ManagedService service in ServiceCatalog.All) {
+            ServiceStatusResult? result = results.GetValueOrDefault(service.Name);
+            <MudPaper Elevation="0" Outlined="true" Class="content-card service-card">
+                <div class="service-card-header">
+                    <div>
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">@service.Category</MudText>
+                        <MudLink Href="@($"/services/{service.Name}")" Typo="Typo.h6">@service.DisplayName</MudLink>
+                    </div>
+                    @if (result is not null) {
+                        <StateChip State="@OverallState(result)" />
+                    }
+                </div>
+                @if (result?.Status is ServiceStatus status) {
+                    <MudText Typo="Typo.body2">@Summary(service, status)</MudText>
+                    @foreach (string issue in Issues(status).Take(3)) {
+                        <MudText Typo="Typo.caption" Class="issue-text">@issue</MudText>
+                    }
+                } else if (result is not null) {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">@result.Error</MudText>
+                }
+            </MudPaper>
+        }
+    </div>
+</MudStack>
+
+@code {
+    private readonly Dictionary<string, ServiceStatusResult> results = new(StringComparer.Ordinal);
+    private bool loading;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync() {
+        loading = true;
+        ServiceStatusResult[] fetched = await Task.WhenAll(ServiceCatalog.All.Select(service => StatusClient.GetAsync(service.Name)));
+
+        for (int i = 0; i < fetched.Length; i++) {
+            results[ServiceCatalog.All[i].Name] = fetched[i];
+        }
+
+        loading = false;
+    }
+
+    private static string OverallState(ServiceStatusResult result) =>
+        result.Status is null ? "unreachable" : Issues(result.Status).Any() ? "problem" : "ok";
+
+    private static string Summary(ManagedService service, ServiceStatus status) {
+        if (service.Schema is null) {
+            return status.ConfigFile?.Exists == true ? "設定檔已載入。" : "尚未建立設定檔，使用預設值。";
+        }
+
+        List<ConnectionLoadStatus> connections = status.Connections ?? [];
+        int loaded = connections.Count(item => item.State == "loaded");
+
+        return connections.Count == 0 ? "尚未設定連線。" : $"{loaded} / {connections.Count} 個連線已載入。";
+    }
+
+    private static IEnumerable<string> Issues(ServiceStatus status) {
+        if (status.ConfigFile?.LastError is { Length: > 0 } error) {
+            yield return $"設定檔語法錯誤：{error}";
+        }
+
+        foreach (ConnectionLoadStatus item in (status.Connections ?? []).Where(item => item.State != "loaded")) {
+            yield return $"{item.Alias}：{string.Join(" ", item.Errors)}";
+        }
+
+        foreach (IgnoredSettingStatus item in status.IgnoredSettings ?? []) {
+            yield return $"{item.Key} 被忽略：{item.Reason}";
+        }
+    }
+}

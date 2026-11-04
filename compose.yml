@@ -1,6 +1,10 @@
 name: ${COMPOSE_PROJECT_NAME:-mcp-lab}
 
 include:
+  # Admin
+  - path: admin/web/compose.yml
+    env_file: .env
+
   # API
   - path: api/contract/compose.yml
     env_file: .env

@@ -1,0 +1,13 @@
+<MudNavMenu Class="navigation-menu">
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">總覽</MudNavLink>
+    @foreach (IGrouping<string, ManagedService> group in ServiceCatalog.All.GroupBy(service => service.Category)) {
+        <MudNavGroup Title="@group.Key" Expanded="true">
+            @foreach (ManagedService service in group) {
+                <MudNavLink Href="@($"/services/{service.Name}")" Match="NavLinkMatch.All">@service.DisplayName</MudNavLink>
+            }
+        </MudNavGroup>
+    }
+    <MudDivider Class="my-2" />
+    <MudNavLink Href="/access" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Key">存取權杖</MudNavLink>
+    <MudNavLink Href="/import" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.UploadFile">從 .env 匯入</MudNavLink>
+</MudNavMenu>

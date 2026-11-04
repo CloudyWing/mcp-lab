@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\admin\web\McpLab.Admin.csproj" />
     <ProjectReference Include="..\..\api\contract\McpLab.ApiContract.csproj" />
     <ProjectReference Include="..\..\datastores\elastic\McpLab.Elastic.csproj" />
     <ProjectReference Include="..\..\datastores\oracle\McpLab.Oracle.csproj" />

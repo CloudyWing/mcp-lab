@@ -1,0 +1,406 @@
+@page "/services/{Name}"
+@attribute [Authorize]
+@inject ConfigStore Store
+@inject ServiceStatusClient StatusClient
+@inject ConfigApplier Applier
+@inject ConnectionTester Tester
+@inject ISnackbar Snackbar
+
+<PageTitle>@(service?.DisplayName ?? Name) - MCP Lab</PageTitle>
+@if (service is null) {
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">找不到服務 @Name。</MudAlert>
+} else {
+    <MudStack Spacing="4" Class="page-stack">
+        <div class="page-heading-row">
+            <div class="page-heading">
+                <MudText Typo="Typo.h4">@service.DisplayName</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">設定檔：config/@service.Name/service.env</MudText>
+            </div>
+            <div class="heading-actions">
+                @if (status is not null) {
+                    <StateChip State="@(status.Status is null ? "unreachable" : "ok")" />
+                }
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="busy" OnClick="LoadAsync">重新整理</MudButton>
+            </div>
+        </div>
+
+        @if (lastResult is ApplyResult result) {
+            <MudAlert Severity="@ResultSeverity(result.Outcome)" Variant="Variant.Outlined" ShowCloseIcon="true" CloseIconClicked="() => lastResult = null">
+                <div>@result.Message</div>
+                @foreach (string detail in result.Details) {
+                    <div class="issue-text">@detail</div>
+                }
+            </MudAlert>
+        }
+        @if (fileError is not null) {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">設定檔語法錯誤：@fileError。請修正檔案，或從「從 .env 匯入」重新匯入。</MudAlert>
+        }
+        @if (status?.Status is null && status?.Error is not null) {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@status.Error 仍可編輯設定，但無法確認服務是否套用。</MudAlert>
+        }
+        @if (status?.Status?.ConfigFile?.LastError is { Length: > 0 } liveError) {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">服務目前讀不到這個設定檔，仍在使用前一份設定：@liveError</MudAlert>
+        }
+        @if (status?.Status?.IgnoredSettings is { Count: > 0 } ignored) {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                <div>以下設定被服務忽略：</div>
+                @foreach (IgnoredSettingStatus item in ignored) {
+                    <div class="issue-text"><code>@item.Key</code>：@item.Reason</div>
+                }
+            </MudAlert>
+        }
+
+        @if (service.Schema is ConnectionSchema schema) {
+            <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                <div class="card-heading-row">
+                    <div>
+                        <MudText Typo="Typo.h6">連線</MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Agent 以「名稱」指定連線；寫入類工具必須指定。</MudText>
+                    </div>
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" Disabled="busy || file is null" OnClick="NewConnection">新增連線</MudButton>
+                </div>
+                @if (connections.Count == 0) {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">尚未設定連線。</MudText>
+                } else {
+                    <div class="table-scroll">
+                        <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                            <thead>
+                                <tr><th>Alias</th><th>名稱</th><th>目標</th><th>狀態</th><th class="actions-col">操作</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (ConnectionEntry entry in connections) {
+                                    ConnectionEntry current = entry;
+                                    ConnectionLoadStatus? live = LiveStatus(current.Alias);
+                                    <tr>
+                                        <td><code>@current.Alias</code></td>
+                                        <td>@current.Name</td>
+                                        <td class="target-col">@Target(current)</td>
+                                        <td>
+                                            <StateChip State="@(live?.State ?? current.State)" />
+                                            @foreach (string error in live?.Errors ?? [.. current.Errors]) {
+                                                <div class="issue-text">@error</div>
+                                            }
+                                        </td>
+                                        <td class="actions-col">
+                                            @if (service.TestTool is not null) {
+                                                <MudIconButton Icon="@Icons.Material.Filled.NetworkCheck" aria-label="@($"測試 {current.Alias}")" title="測試連線"
+                                                               Disabled="@(busy || testing.Contains(current.Alias) || current.State != "loaded")" OnClick="() => TestAsync(current)" />
+                                            }
+                                            <MudIconButton Icon="@Icons.Material.Filled.Edit" aria-label="@($"編輯 {current.Alias}")" title="編輯" Disabled="busy" OnClick="() => EditConnection(current)" />
+                                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" aria-label="@($"複製 {current.Alias}")" title="複製為新連線" Disabled="busy" OnClick="() => CopyConnection(current)" />
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" aria-label="@($"刪除 {current.Alias}")" title="刪除" Disabled="busy" OnClick="() => deleting = current" />
+                                        </td>
+                                    </tr>
+                                    @if (testResults.TryGetValue(current.Alias, out ConnectionTestResult? test)) {
+                                        <tr class="test-row">
+                                            <td colspan="5">
+                                                <MudAlert Severity="@(test.Success ? Severity.Success : Severity.Error)" Variant="Variant.Text" Dense="true">
+                                                    測試 @current.Alias：@test.Message
+                                                </MudAlert>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </div>
+                }
+            </MudPaper>
+        }
+
+        @if (settings.Count > 0) {
+            <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                <MudText Typo="Typo.h6">服務設定</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">留空表示使用預設值。超出範圍的值會被截到上限，非法值會改用預設值。</MudText>
+                <div class="settings-grid">
+                    @foreach (SettingRow row in settings) {
+                        SettingRow current = row;
+                        <MudTextField T="string" Label="@current.Name" Immediate="true" @bind-Value="current.Input"
+                                      Placeholder="@Format(current.DefaultValue)"
+                                      HelperText="@SettingHelper(current)"
+                                      Error="@(current.Error is not null)" ErrorText="@current.Error" />
+                    }
+                </div>
+                <div>
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="busy || file is null" OnClick="SaveSettingsAsync">
+                        @(busy ? "正在儲存…" : "儲存服務設定")
+                    </MudButton>
+                </div>
+            </MudPaper>
+        }
+
+        @if (service.Schema is null && settings.Count == 0) {
+            <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                <MudText Typo="Typo.body2">此服務沒有可在這裡管理的設定。存取權杖請到「存取權杖」頁面設定。</MudText>
+            </MudPaper>
+        }
+    </MudStack>
+
+    <ConnectionEditor @bind-Visible="editorOpen" Title="@editorTitle" Schema="service.Schema" Draft="draft" SecretsSet="draftSecrets"
+                      Errors="editorErrors" Busy="busy" OnSave="SaveConnectionAsync" />
+
+    <MudDialog Visible="@(deleting is not null)" VisibleChanged="@(visible => { if (!visible) deleting = null; })" Options="ConfirmOptions" ActionsClass="dialog-actions">
+        <DialogContent>
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">確認刪除連線</MudText>
+                @if (deleting is not null) {
+                    <MudText Typo="Typo.body1"><code>@deleting.Alias</code>（@deleting.Name）</MudText>
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">刪除後，Agent 將無法再使用這個連線。上一版設定檔會保留在備份中。</MudAlert>
+                }
+            </MudStack>
+        </DialogContent>
+        <DialogActions>
+            <MudButton Variant="Variant.Text" Disabled="busy" OnClick="() => deleting = null">取消</MudButton>
+            <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="busy" OnClick="DeleteConnectionAsync">@(busy ? "正在刪除…" : "確認刪除")</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private static readonly DialogOptions ConfirmOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+    };
+
+    [Parameter]
+    public string Name { get; set; } = "";
+
+    private ManagedService? service;
+    private EnvFile? file;
+    private string? fileError;
+    private ServiceStatusResult? status;
+    private List<ConnectionEntry> connections = [];
+    private List<SettingRow> settings = [];
+    private readonly Dictionary<string, ConnectionTestResult> testResults = new(StringComparer.Ordinal);
+    private readonly HashSet<string> testing = new(StringComparer.Ordinal);
+    private ApplyResult? lastResult;
+    private bool busy;
+
+    private bool editorOpen;
+    private string editorTitle = "";
+    private ConnectionDraft? draft;
+    private IReadOnlySet<string> draftSecrets = new HashSet<string>();
+    private IReadOnlyList<string> editorErrors = [];
+    private ConnectionEntry? deleting;
+
+    protected override async Task OnParametersSetAsync() {
+        service = ServiceCatalog.Find(Name);
+        lastResult = null;
+        testResults.Clear();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() {
+        if (service is null) {
+            return;
+        }
+
+        try {
+            file = EnvFile.Parse(Store.Read(service.Name));
+            fileError = null;
+        } catch (FormatException ex) {
+            file = null;
+            fileError = ex.Message;
+        }
+
+        status = await StatusClient.GetAsync(service.Name);
+        connections = file is not null && service.Schema is not null ? [.. ConfigEditor.ListConnections(service.Schema, file)] : [];
+        settings = BuildSettings();
+    }
+
+    private List<SettingRow> BuildSettings() {
+        IReadOnlyDictionary<string, string> values = file?.Values ?? new Dictionary<string, string>();
+        List<SettingStatus> live = status?.Status?.Settings ?? [];
+        IEnumerable<SettingRow> rows = service!.Settings.Count > 0
+            ? service.Settings.Select(setting => new SettingRow(setting.Name, setting.Description, setting.Unit, setting.DefaultValue, setting.Min, setting.Max, setting.Fallbacks ?? []))
+            : live.Select(setting => new SettingRow(setting.Name, setting.Description, setting.Unit, setting.DefaultValue, setting.Min, setting.Max, setting.Fallbacks));
+
+        return rows.Select(row => {
+            row.Input = values.GetValueOrDefault(row.Name) is { Length: > 0 } value
+                ? value
+                : row.Fallbacks.Select(fallback => values.GetValueOrDefault(fallback) ?? "").FirstOrDefault(value => value.Length > 0) ?? "";
+            row.Effective = live.FirstOrDefault(item => item.Name == row.Name)?.Effective;
+            return row;
+        }).ToList();
+    }
+
+    private ConnectionLoadStatus? LiveStatus(string alias) =>
+        status?.Status?.Connections?.FirstOrDefault(item => item.Alias == alias);
+
+    private static string Target(ConnectionEntry entry) {
+        string[] fields = ["HOST", "URL", "ISSUER", "SPEC_URL", "SPEC_PATH"];
+        string target = fields.Select(field => entry.Values.GetValueOrDefault(field) ?? "").FirstOrDefault(value => value.Length > 0) ?? "";
+        string port = entry.Values.GetValueOrDefault("PORT") ?? entry.Values.GetValueOrDefault("MGMTPORT") ?? "";
+
+        return port.Length > 0 && entry.Values.ContainsKey("HOST") ? $"{target}:{port}" : target;
+    }
+
+    private void NewConnection() {
+        draft = new ConnectionDraft { Alias = connections.Count == 0 ? "LOCAL" : "" };
+        draftSecrets = new HashSet<string>();
+        editorErrors = [];
+        editorTitle = "新增連線";
+        editorOpen = true;
+    }
+
+    private void EditConnection(ConnectionEntry entry) {
+        draft = new ConnectionDraft { OriginalAlias = entry.Alias, Alias = entry.Alias };
+
+        foreach ((string field, string value) in entry.Values) {
+            draft.Values[field] = value;
+        }
+
+        draftSecrets = entry.SecretsSet;
+        editorErrors = [];
+        editorTitle = $"編輯連線 {entry.Alias}";
+        editorOpen = true;
+    }
+
+    private void CopyConnection(ConnectionEntry entry) {
+        draft = ConfigEditor.CopyDraft(service!.Schema!, file!, entry.Alias, ConfigEditor.SuggestAlias(service.Schema!, file!, entry.Alias));
+        draftSecrets = new HashSet<string>();
+        editorErrors = [];
+        editorTitle = $"複製 {entry.Alias}";
+        editorOpen = true;
+    }
+
+    private async Task SaveConnectionAsync() {
+        if (draft is null || file is null || service?.Schema is not ConnectionSchema schema) {
+            return;
+        }
+
+        editorErrors = ConfigEditor.Validate(schema, file, draft);
+
+        if (editorErrors.Count > 0) {
+            return;
+        }
+
+        EnvFile updated = EnvFile.Parse(file.ToString());
+        ConfigEditor.Apply(schema, updated, draft);
+
+        if (await SaveAsync(updated)) {
+            editorOpen = false;
+        }
+    }
+
+    private async Task DeleteConnectionAsync() {
+        if (deleting is null || file is null || service?.Schema is not ConnectionSchema schema) {
+            return;
+        }
+
+        EnvFile updated = EnvFile.Parse(file.ToString());
+        ConfigEditor.Delete(schema, updated, deleting.Alias);
+        testResults.Remove(deleting.Alias);
+
+        if (await SaveAsync(updated)) {
+            deleting = null;
+        }
+    }
+
+    private async Task SaveSettingsAsync() {
+        if (file is null) {
+            return;
+        }
+
+        foreach (SettingRow row in settings) {
+            row.Error = ValidateSetting(row);
+        }
+
+        if (settings.Any(row => row.Error is not null)) {
+            return;
+        }
+
+        EnvFile updated = EnvFile.Parse(file.ToString());
+
+        foreach (SettingRow row in settings) {
+            ConfigEditor.SetSetting(updated, row.Name, row.Fallbacks, row.Input);
+        }
+
+        await SaveAsync(updated);
+    }
+
+    private async Task<bool> SaveAsync(EnvFile updated) {
+        busy = true;
+
+        try {
+            lastResult = await Applier.SaveAsync(service!.Name, updated.ToString());
+            Snackbar.Add(lastResult.Message, ResultSeverity(lastResult.Outcome));
+            await LoadAsync();
+
+            return lastResult.Outcome != ApplyOutcome.RolledBack;
+        } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException) {
+            lastResult = new ApplyResult(ApplyOutcome.RolledBack, $"無法寫入設定檔：{ex.Message}", []);
+            return false;
+        } finally {
+            busy = false;
+        }
+    }
+
+    private async Task TestAsync(ConnectionEntry entry) {
+        testing.Add(entry.Alias);
+        testResults.Remove(entry.Alias);
+
+        try {
+            testResults[entry.Alias] = await Tester.TestAsync(service!, entry.Name);
+        } finally {
+            testing.Remove(entry.Alias);
+        }
+    }
+
+    private static string? ValidateSetting(SettingRow row) {
+        string input = row.Input?.Trim() ?? "";
+
+        if (input.Length == 0) {
+            return null;
+        }
+
+        bool allowDecimal = row.Unit == "MB";
+        System.Globalization.NumberStyles style = allowDecimal
+            ? System.Globalization.NumberStyles.Float
+            : System.Globalization.NumberStyles.Integer;
+
+        if (!double.TryParse(input, style, System.Globalization.CultureInfo.InvariantCulture, out double value)) {
+            return allowDecimal ? "請輸入數字。" : "請輸入整數。";
+        }
+
+        return value < row.Min || value > row.Max ? $"允許範圍 {Format(row.Min)} 到 {Format(row.Max)}。" : null;
+    }
+
+    private static string SettingHelper(SettingRow row) {
+        string effective = row.Effective is double value ? $"目前生效：{Format(value)}。" : "";
+        return $"{row.Description}（{row.Unit}）。預設 {Format(row.DefaultValue)}，範圍 {Format(row.Min)} 到 {Format(row.Max)}。{effective}";
+    }
+
+    private static string Format(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static Severity ResultSeverity(ApplyOutcome outcome) => outcome switch {
+        ApplyOutcome.Applied => Severity.Success,
+        ApplyOutcome.RolledBack => Severity.Error,
+        _ => Severity.Warning,
+    };
+
+    private sealed class SettingRow(string name, string description, string unit, double defaultValue, double min, double max, IReadOnlyList<string> fallbacks) {
+        public string Name { get; } = name;
+
+        public string Description { get; } = description;
+
+        public string Unit { get; } = unit;
+
+        public double DefaultValue { get; } = defaultValue;
+
+        public double Min { get; } = min;
+
+        public double Max { get; } = max;
+
+        public IReadOnlyList<string> Fallbacks { get; } = fallbacks;
+
+        public string? Input { get; set; }
+
+        public double? Effective { get; set; }
+
+        public string? Error { get; set; }
+    }
+}

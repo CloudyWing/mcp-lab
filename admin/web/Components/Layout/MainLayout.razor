@@ -1,0 +1,49 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider @ref="themeProvider" Theme="AdminTheme.Theme" IsDarkMode="isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout Class="app-layout">
+    <MudAppBar Elevation="0" Color="Color.Default">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" aria-label="開啟或關閉導覽" OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6" Class="app-title">MCP Lab 設定管理</MudText>
+        <MudSpacer />
+        <form method="post" action="/account/logout">
+            <AntiforgeryToken />
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text" Color="Color.Inherit" StartIcon="@Icons.Material.Filled.Logout">登出</MudButton>
+        </form>
+    </MudAppBar>
+    <MudDrawer @bind-Open="drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Variant="DrawerVariant.Responsive">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent Class="main-content">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="page-container">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private MudThemeProvider? themeProvider;
+    private bool drawerOpen = true;
+    private bool isDarkMode;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (firstRender && themeProvider is not null) {
+            isDarkMode = await themeProvider.GetSystemDarkModeAsync();
+            await themeProvider.WatchSystemDarkModeAsync(OnSystemDarkModeChangedAsync);
+            StateHasChanged();
+        }
+    }
+
+    private Task OnSystemDarkModeChangedAsync(bool isDark) {
+        isDarkMode = isDark;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleDrawer() {
+        drawerOpen = !drawerOpen;
+    }
+}

@@ -40,6 +40,8 @@ EXPECTED_SERVICES = [
 ]
 # Started only with `docker compose --profile docker up`; skipped when absent.
 OPTIONAL_SERVICES = {"mcp-docker"}
+# The admin UI is checked separately: it mounts the whole config directory and is not an MCP server.
+ADMIN_SERVICE = "mcp-admin"
 
 
 class SmokeError(Exception):
@@ -222,6 +224,7 @@ def main() -> int:
     ]
 
     runner.check("compose services are running and healthy", lambda: check_compose_health(status_by_service))
+    runner.check("admin UI requires sign-in", lambda: check_admin(status_by_service, args.timeout_seconds))
     runner.check("MCP ports bind to loopback by default", lambda: check_loopback_ports(status_by_service))
     runner.check(
         "MCP endpoints enforce MCPLAB_MCP_TOKEN when configured",
@@ -332,7 +335,11 @@ def check_loopback_ports(status_by_service: dict[str, dict[str, Any]]) -> None:
     bind_address = read_setting("MCP_BIND_ADDRESS") or "127.0.0.1"
     exposed: list[str] = []
 
-    for service in EXPECTED_SERVICES:
+    for service in [*EXPECTED_SERVICES, ADMIN_SERVICE]:
+        if service not in status_by_service:
+            continue
+        if service == ADMIN_SERVICE:
+            bind_address = read_setting("MCP_ADMIN_BIND_ADDRESS") or "127.0.0.1"
         for publisher in status_by_service[service].get("Publishers") or []:
             if publisher.get("TargetPort") == 8080 and publisher.get("PublishedPort"):
                 if publisher.get("URL") != bind_address:
@@ -364,6 +371,35 @@ def check_access_token(status_by_service: dict[str, dict[str, Any]], timeout_sec
     raise SmokeError("Request without a token was accepted.")
 
 
+def check_admin(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    status = status_by_service.get(ADMIN_SERVICE)
+    if not status:
+        raise SmokeError(f"{ADMIN_SERVICE} is not running.")
+    if status.get("State") != "running" or (status.get("Health") and status.get("Health") != "healthy"):
+        raise SmokeError(f"{ADMIN_SERVICE} state={status.get('State')} health={status.get('Health')}")
+
+    base_url = service_url(status_by_service, ADMIN_SERVICE).removesuffix("/mcp")
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        opener.open(base_url + "/", timeout=timeout_seconds)
+        raise SmokeError("Admin home page was served without signing in.")
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (301, 302) or "/login" not in (exc.headers.get("Location") or ""):
+            raise SmokeError(f"Expected a redirect to /login, got HTTP {exc.code}") from exc
+
+    with urllib.request.urlopen(base_url + "/login", timeout=timeout_seconds) as response:
+        body = response.read().decode("utf-8")
+    if "MCP Lab" not in body:
+        raise SmokeError("Admin sign-in page did not render.")
+    if not read_setting("MCPLAB_ADMIN_PASSWORD") and "MCPLAB_ADMIN_PASSWORD" not in body:
+        raise SmokeError("Admin sign-in page does not explain that MCPLAB_ADMIN_PASSWORD is missing.")
+
+
 def check_config_isolation() -> None:
     completed = run_command(["docker", "inspect", *EXPECTED_SERVICES])
     leaks: list[str] = []
@@ -387,7 +423,7 @@ def check_config_isolation() -> None:
 
 
 def check_container_security() -> None:
-    completed = run_command(["docker", "inspect", *EXPECTED_SERVICES])
+    completed = run_command(["docker", "inspect", *EXPECTED_SERVICES, ADMIN_SERVICE])
     containers = json.loads(completed.stdout)
     failures: list[str] = []
 

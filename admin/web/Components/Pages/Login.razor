@@ -1,0 +1,37 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout LoginLayout
+@inject AdminPassword Password
+
+<PageTitle>登入 - MCP Lab</PageTitle>
+<MudPaper Elevation="0" Outlined="true" Class="content-card login-card">
+    <MudText Typo="Typo.h5">MCP Lab 設定管理</MudText>
+    @if (!Password.IsConfigured) {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            尚未設定管理密碼。請在根目錄 .env 設定 MCPLAB_ADMIN_PASSWORD（至少 @AdminPassword.MinimumLength 個字元），再執行 docker compose up -d mcp-admin 重新建立容器。
+        </MudAlert>
+    } else {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">請輸入 .env 中 MCPLAB_ADMIN_PASSWORD 的值。</MudText>
+        @if (Failed == 1) {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">密碼不正確，請再試一次。</MudAlert>
+        }
+        <form method="post" action="/account/login" class="login-form">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <label for="secret" class="login-label">管理密碼</label>
+            <input id="secret" name="secret" type="password" class="login-input" autocomplete="current-password" required autofocus />
+            <button type="submit" class="mud-button-root mud-button mud-button-filled mud-button-filled-primary mud-button-filled-size-medium mud-ripple login-submit">
+                <span class="mud-button-label">登入</span>
+            </button>
+        </form>
+    }
+</MudPaper>
+
+@code {
+    [SupplyParameterFromQuery]
+    private int? Failed { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+}

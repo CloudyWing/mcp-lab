@@ -1,0 +1,28 @@
+services:
+  mcp-admin:
+    container_name: mcp-admin
+    build:
+      context: ../..
+      dockerfile: admin/web/Dockerfile
+      args:
+        DOTNET_TAG: ${DOTNET_TAG:-10.0}
+    extends:
+      file: ../../policies/base.yml
+      service: default-policy
+    environment:
+      MCPLAB_CONFIG_ROOT: /app/config
+      MCPLAB_ADMIN_PASSWORD: ${MCPLAB_ADMIN_PASSWORD:-}
+    volumes:
+      - ../../config:/app/config
+    ports:
+      - "${MCP_ADMIN_BIND_ADDRESS:-127.0.0.1}:${MCP_ADMIN_PORT:-9890}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - shared_net

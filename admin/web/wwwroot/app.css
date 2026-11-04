@@ -1,0 +1,188 @@
+html,
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Roboto, "Noto Sans TC", "Microsoft JhengHei", Helvetica, Arial, sans-serif;
+}
+
+.app-layout,
+.main-content {
+  min-height: 100vh;
+}
+
+.app-title {
+  margin-inline-start: 0.5rem;
+}
+
+.page-container {
+  padding-block: 1.5rem;
+}
+
+.page-stack {
+  width: 100%;
+}
+
+.page-heading {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.page-heading-row,
+.card-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.heading-actions,
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.content-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.navigation-menu {
+  padding: 0.5rem;
+}
+
+.mud-button-root,
+.mud-icon-button,
+.mud-nav-link {
+  min-height: 44px;
+}
+
+.mud-button-root {
+  min-width: 44px;
+}
+
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.service-card {
+  align-content: start;
+  gap: 0.5rem;
+}
+
+.service-card-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.issue-text {
+  display: block;
+  color: var(--mud-palette-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.target-col {
+  overflow-wrap: anywhere;
+  max-width: 22rem;
+}
+
+.actions-col {
+  white-space: nowrap;
+  text-align: end;
+}
+
+.test-row td {
+  padding-top: 0 !important;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.secret-field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.dialog-actions {
+  gap: 0.5rem;
+  padding: 0 1.5rem 1rem;
+}
+
+.token-value {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: var(--mud-palette-background-gray);
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+}
+
+.env-input textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1rem;
+  background: var(--mud-palette-background);
+}
+
+.login-card {
+  width: min(100%, 420px);
+}
+
+.login-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.login-label {
+  font-size: 0.875rem;
+  color: var(--mud-palette-text-secondary);
+}
+
+.login-input {
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--mud-palette-lines-inputs);
+  border-radius: 4px;
+  background: var(--mud-palette-surface);
+  color: var(--mud-palette-text-primary);
+  font: inherit;
+}
+
+.login-input:focus-visible {
+  outline: 2px solid var(--mud-palette-primary);
+  outline-offset: 1px;
+}
+
+.login-submit {
+  min-height: 44px;
+}

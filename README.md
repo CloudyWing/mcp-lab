@@ -19,6 +19,7 @@ AI Agent 在沒有專屬工具的情況下操作資料庫時，通常會透過�
 | tools | mcp-mailpit | 9830 | .NET 10 | Mailpit 測試信箱唯讀檢查 |
 | documents | mcp-reader | 9840 | Python 3.12 | 文件、圖片、文字檔讀取與搜尋 |
 | system | mcp-docker | 9860 | .NET 10 | Docker / Compose read-only 狀態檢查 |
+| admin | mcp-admin | 9890 | .NET 10 Blazor | 設定管理介面（非 MCP 服務） |
 
 ## 多連線支援
 
@@ -64,11 +65,13 @@ Agent 可呼叫 `list_connections()` 查詢可用連線，再以 `connection="st
 
 ```bash
 cp .env.example .env
+# 在 .env 設定 MCPLAB_ADMIN_PASSWORD（至少 8 個字元）
 python3 scripts/init-config.py
-# 在 config/<服務>/service.env 填入至少一個連線設定
 docker compose up -d --build
 docker compose ps
 ```
+
+啟動後開啟 http://127.0.0.1:9890 ，以 `MCPLAB_ADMIN_PASSWORD` 登入設定管理介面，新增連線與調整設定。也可以直接編輯 `config/<服務>/service.env`。
 
 設定分成兩層：
 
@@ -92,6 +95,30 @@ docker compose up -d --force-recreate
 ```bash
 docker compose --profile docker up -d --build
 ```
+
+## 設定管理介面
+
+`mcp-admin` 是以 Blazor 與 MudBlazor 製作的設定管理介面，取代手動編輯 `service.env`：
+
+| 頁面 | 功能 |
+| --- | --- |
+| 總覽 | 各服務是否連得到、連線載入數量，以及設定錯誤與被忽略的變數 |
+| 各服務頁 | 新增、編輯、複製、刪除連線；以該服務的 ping 工具測試連線；編輯查詢限制與逾時 |
+| 存取權杖 | 一次替所有服務產生或停用 `MCPLAB_MCP_TOKEN` |
+| 從 .env 匯入 | 貼上舊版 `.env`，預覽每個變數會分到哪個服務，並先列出打錯的欄位與不合法的 Alias |
+
+行為說明：
+
+- 表單依各服務的連線 Schema 產生，存檔前會檢查必填欄位、Port、URL、Alias 格式與名稱重複，有誤時無法儲存。
+- 密碼類欄位只寫不讀：畫面只顯示「已設定」，留空表示保持不變。
+- 存檔後會等服務熱重載，再以 `/config/status` 確認結果；若新設定讓原本可用的連線失效，會自動還原上一版。每次寫入前的內容會備份在 `config/.admin/history`，各服務保留最近 20 版。
+- 只修改受影響的變數，檔案中的註解與順序會保留。
+
+存取限制：
+
+- 預設只綁定 `127.0.0.1:9890`，可用 `MCP_ADMIN_BIND_ADDRESS`、`MCP_ADMIN_PORT` 調整，與 MCP 服務的 `MCP_BIND_ADDRESS` 分開設定。
+- 需以 `MCPLAB_ADMIN_PASSWORD` 登入；未設定或少於 8 個字元時無法登入。修改密碼後需執行 `docker compose up -d mcp-admin` 重新建立容器。
+- `mcp-admin` 會掛載整個 `config/` 目錄（可寫入）以管理各服務設定，各 MCP 服務仍只掛載自己的目錄。
 
 ## 存取控制
 

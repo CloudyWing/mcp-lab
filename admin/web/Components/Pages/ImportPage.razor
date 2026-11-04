@@ -1,0 +1,122 @@
+@page "/import"
+@attribute [Authorize]
+@inject ConfigStore Store
+@inject ConfigApplier Applier
+@inject ISnackbar Snackbar
+
+<PageTitle>從 .env 匯入 - MCP Lab</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <div class="page-heading">
+        <MudText Typo="Typo.h4">從 .env 匯入</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            貼上舊版 .env 的內容，系統會依變數前綴分到各服務的設定檔，並先檢查打錯的欄位、不合法的 Alias 與重複的名稱。已存在的同名變數會被覆蓋。
+        </MudText>
+    </div>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudTextField T="string" Label=".env 內容" @bind-Value="envText" Immediate="true" Lines="12" Variant="Variant.Outlined" Class="env-input" spellcheck="false" />
+        <div class="button-row">
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Preview" Disabled="busy || string.IsNullOrWhiteSpace(envText)" OnClick="PreviewImport">預覽</MudButton>
+        </div>
+        @if (parseError is not null) {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">.env 語法錯誤：@parseError</MudAlert>
+        }
+    </MudPaper>
+
+    @if (preview is not null) {
+        <MudPaper Elevation="0" Outlined="true" Class="content-card">
+            <MudText Typo="Typo.h6">預覽</MudText>
+            <MudText Typo="Typo.body2">
+                將匯入 @preview.Items.Count(item => item.Note is null) 個變數到 @preview.MergedFiles.Count 個服務，略過 @preview.Items.Count(item => item.Note is not null) 個。
+            </MudText>
+            @foreach (ImportServiceCheck check in preview.Checks) {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    <div>@ServiceCatalog.Find(check.Service)?.DisplayName 匯入後有問題：</div>
+                    @foreach (RejectedConnection rejected in check.Rejected) {
+                        <div class="issue-text">@rejected.Alias：@string.Join(" ", rejected.Errors)</div>
+                    }
+                    @foreach (IgnoredSetting ignored in check.Ignored) {
+                        <div class="issue-text"><code>@ignored.Key</code>：@ignored.Reason</div>
+                    }
+                </MudAlert>
+            }
+            <div class="table-scroll">
+                <MudSimpleTable Dense="true" Elevation="0">
+                    <thead><tr><th>變數</th><th>匯入到</th></tr></thead>
+                    <tbody>
+                        @foreach (ImportItem item in preview.Items) {
+                            <tr>
+                                <td><code>@item.Key</code>@(item.IsSecret ? "（值已隱藏）" : "")</td>
+                                <td>
+                                    @if (item.Note is null) {
+                                        @string.Join("、", item.Services.Select(service => ServiceCatalog.Find(service)?.DisplayName ?? service))
+                                    } else {
+                                        <span class="mud-text-secondary">@item.Note</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+            <div class="button-row">
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" Disabled="busy || preview.MergedFiles.Count == 0" OnClick="ApplyAsync">
+                    @(busy ? "正在套用…" : "套用")
+                </MudButton>
+            </div>
+            @foreach ((string service, ApplyResult result) in results) {
+                <MudAlert Severity="@(result.Outcome switch { ApplyOutcome.Applied => Severity.Success, ApplyOutcome.RolledBack => Severity.Error, _ => Severity.Warning })" Variant="Variant.Text" Dense="true">
+                    @ServiceCatalog.Find(service)?.DisplayName：@result.Message
+                    @foreach (string detail in result.Details) {
+                        <div class="issue-text">@detail</div>
+                    }
+                </MudAlert>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private string envText = "";
+    private string? parseError;
+    private ImportPreview? preview;
+    private readonly List<(string Service, ApplyResult Result)> results = [];
+    private bool busy;
+
+    private void PreviewImport() {
+        results.Clear();
+
+        try {
+            preview = EnvImporter.Preview(envText, Store);
+            parseError = null;
+        } catch (FormatException ex) {
+            preview = null;
+            parseError = ex.Message;
+        }
+    }
+
+    private async Task ApplyAsync() {
+        if (preview is null) {
+            return;
+        }
+
+        busy = true;
+        results.Clear();
+
+        try {
+            // Rebuild against the current files in case they changed after the preview.
+            ImportPreview current = EnvImporter.Preview(envText, Store);
+
+            foreach ((string service, string content) in current.MergedFiles) {
+                results.Add((service, await Applier.SaveAsync(service, content)));
+            }
+
+            envText = "";
+            Snackbar.Add("匯入完成，請查看各服務結果。", Severity.Success);
+        } catch (FormatException ex) {
+            parseError = ex.Message;
+        } finally {
+            busy = false;
+        }
+    }
+}
