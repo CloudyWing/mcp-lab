@@ -284,6 +284,10 @@ def main() -> int:
         lambda: check_reader(status_by_service, args.timeout_seconds),
     )
     runner.check(
+        "Reader MCP parses PDF, Office, image and text samples",
+        lambda: check_reader_samples(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
         "Docker MCP can inspect compose containers",
         lambda: check_docker_mcp(status_by_service, args.timeout_seconds),
     )
@@ -742,6 +746,45 @@ def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: 
 
     if int(listing.get("returned_count", 0)) > 5:
         raise SmokeError(f"Reader list_documents ignored the limit: {listing_text}")
+
+
+READER_SAMPLES = {
+    "sample.pdf": ("pdf", ["MCP Lab sample pdf page 1", "MCP Lab sample pdf page 2"]),
+    "sample.docx": ("docx", ["中文段落", "docx-table-value"]),
+    "sample.pptx": ("pptx", ["MCP Lab sample pptx", "投影片內容"]),
+    "sample.xlsx": ("xlsx", ["MCP Lab sample xlsx", "試算表"]),
+    "sample.png": ("image", []),
+    "sample.txt": ("text", ["MCP Lab integration test document."]),
+}
+
+
+def check_reader_samples(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    """Parses the sample files in tests/integration/docs; set MCP_SMOKE_READER_SAMPLES to their subpath."""
+    subpath = read_setting("MCP_SMOKE_READER_SAMPLES")
+    if not subpath:
+        raise SkipCheck("set MCP_SMOKE_READER_SAMPLES to the subpath holding tests/integration/docs samples")
+
+    client = create_client(status_by_service, "mcp-reader", timeout_seconds)
+    for name, (expected_type, markers) in READER_SAMPLES.items():
+        path = f"{subpath.rstrip('/')}/{name}"
+        text = client.call_tool("read_document", {"path": path}).text
+        document = json.loads(text)
+        blob = json.dumps(document, ensure_ascii=False)
+
+        if document.get("type") != expected_type:
+            raise SmokeError(f"Reader returned type={document.get('type')} for {name}: {text[:300]}")
+
+        missing = [marker for marker in markers if marker not in blob]
+        if missing:
+            raise SmokeError(f"Reader output for {name} is missing {missing}: {text[:300]}")
+
+    search = json.loads(
+        client.call_tool("search_documents", {"keyword": "MCP Lab sample", "subpath": subpath}).text
+    )
+    found = {Path(result["path"]).name for result in search.get("results", [])}
+    expected = {"sample.pdf", "sample.docx", "sample.pptx", "sample.xlsx"}
+    if not expected <= found:
+        raise SmokeError(f"search_documents missed {sorted(expected - found)}: {search}")
 
 
 def check_docker_mcp(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:

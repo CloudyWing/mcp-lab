@@ -52,6 +52,7 @@ def prepare(args: argparse.Namespace) -> None:
         f"MCPLAB_ADMIN_PASSWORD={ADMIN_PASSWORD}",
         "MCP_SMOKE_MAILPIT_SMTP_HOST=127.0.0.1",
         "MCP_SMOKE_MAILPIT_SMTP_PORT=1025",
+        "MCP_SMOKE_READER_SAMPLES=.",
         *args.env,
     ]
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
