@@ -57,6 +57,7 @@ class SkipCheck(Exception):
 class ToolResult:
     text: str
     raw: dict[str, Any]
+    is_error: bool = False
 
 
 class McpClient:
@@ -118,11 +119,7 @@ class McpClient:
         if not isinstance(result, dict):
             raise SmokeError(f"{name} returned an invalid MCP result.")
 
-        text = extract_tool_text(result)
-        if result.get("isError") is True:
-            raise SmokeError(f"{name} returned isError=true: {text}")
-
-        return ToolResult(text=text, raw=result)
+        return ToolResult(text=extract_tool_text(result), raw=result, is_error=result.get("isError") is True)
 
     def _next_id(self) -> int:
         current_id = self.next_id
@@ -848,6 +845,10 @@ def check_reader(status_by_service: dict[str, dict[str, Any]], timeout_seconds: 
     if int(listing.get("returned_count", 0)) > 5:
         raise SmokeError(f"Reader list_documents ignored the limit: {listing_text}")
 
+    missing = client.call_tool("read_document", {"path": "does-not-exist.pdf"})
+    if not missing.is_error or "error" not in json.loads(missing.text):
+        raise SmokeError(f"Reader did not flag a missing file with isError: {missing.text}")
+
 
 READER_SAMPLES = {
     "sample.pdf": ("pdf", ["MCP Lab sample pdf page 1", "MCP Lab sample pdf page 2"]),
@@ -1055,6 +1056,10 @@ def parse_tool_response(result: ToolResult) -> dict[str, Any]:
 
     if not isinstance(response, dict) or "ok" not in response or "kind" not in response:
         raise SmokeError(f"Tool did not return a response envelope: {result.text}")
+
+    # Failed envelopes must also carry the MCP isError flag, and successful ones must not.
+    if result.is_error != (response.get("ok") is False):
+        raise SmokeError(f"isError={result.is_error} does not match the envelope: {result.text}")
 
     return response
 

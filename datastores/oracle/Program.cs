@@ -16,6 +16,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<OracleTools>();
 
 WebApplication app = builder.Build();

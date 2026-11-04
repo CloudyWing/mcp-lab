@@ -17,6 +17,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<RedisTools>();
 
 WebApplication app = builder.Build();

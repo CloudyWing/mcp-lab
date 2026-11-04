@@ -16,6 +16,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<MqttTools>();
 
 WebApplication app = builder.Build();

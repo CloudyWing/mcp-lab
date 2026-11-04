@@ -16,6 +16,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<DockerTools>();
 
 WebApplication app = builder.Build();

@@ -16,6 +16,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<SqlServerTools>();
 
 WebApplication app = builder.Build();

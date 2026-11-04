@@ -23,6 +23,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<ElasticTools>();
 
 WebApplication app = builder.Build();

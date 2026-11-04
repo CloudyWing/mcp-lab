@@ -21,6 +21,9 @@ def _load_server_module():
         def run(self, *args, **kwargs):
             pass
 
+        async def call_tool(self, name, arguments):
+            return self.next_result
+
         def custom_route(self, *args, **kwargs):
             def decorator(func):
                 return func
@@ -35,6 +38,14 @@ def _load_server_module():
     class FakeSettings:
         model_config = {"env_file": ".env"}
 
+    class FakeModel:
+        def __init__(self, **fields):
+            self.__dict__.update(fields)
+
+    types_module = types.ModuleType("mcp.types")
+    types_module.CallToolResult = type("CallToolResult", (FakeModel,), {})
+    types_module.TextContent = type("TextContent", (FakeModel,), {})
+
     fastmcp_module.FastMCP = FakeFastMCP
     fastmcp_server_module.Settings = FakeSettings
     server_module.fastmcp = fastmcp_module
@@ -43,6 +54,7 @@ def _load_server_module():
     sys.modules.setdefault("mcp.server", server_module)
     sys.modules.setdefault("mcp.server.fastmcp", fastmcp_module)
     sys.modules.setdefault("mcp.server.fastmcp.server", fastmcp_server_module)
+    sys.modules.setdefault("mcp.types", types_module)
 
     if "chardet" not in sys.modules:
         chardet_module = types.ModuleType("chardet")
@@ -276,3 +288,22 @@ class ConfigStatusTests(unittest.TestCase):
             self.assertEqual(server._list_default_limit(), 50)
         finally:
             server._SNAPSHOT.update({})
+
+
+class ToolErrorFlagTests(unittest.TestCase):
+    def _call(self, text):
+        block = server.TextContent(type="text", text=text)
+        server.mcp.next_result = ([block], {"result": text})
+        return asyncio.run(server.mcp.call_tool("read_document", {}))
+
+    def test_error_payload_sets_is_error_and_keeps_content(self):
+        result = self._call('{"error": "File not found: x.pdf"}')
+        self.assertIsInstance(result, server.CallToolResult)
+        self.assertTrue(result.isError)
+        self.assertEqual(result.content[0].text, '{"error": "File not found: x.pdf"}')
+        self.assertEqual(result.structuredContent, {"result": '{"error": "File not found: x.pdf"}'})
+
+    def test_success_payload_is_returned_unchanged(self):
+        for text in ('{"type": "text", "content": "error"}', '{"error": ""}', "[]", "not json"):
+            with self.subTest(text=text):
+                self.assertIsInstance(self._call(text), tuple)

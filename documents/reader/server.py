@@ -17,6 +17,7 @@ from typing import Any
 from dotenv_watcher import DotEnvSnapshot, DotEnvWatcher
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
+from mcp.types import CallToolResult, TextContent
 
 FastMCPSettings.model_config["env_file"] = None
 
@@ -31,7 +32,33 @@ IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ti
 TEXT_EXTS     = {".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log", ".ini", ".toml", ".html"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTS | IMAGE_EXTS | TEXT_EXTS
 
-mcp = FastMCP(
+def _is_error_payload(text: str) -> bool:
+    """Returns whether a tool's JSON text reports a failure through a top-level "error" field."""
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and bool(payload.get("error"))
+
+
+class ReaderMCP(FastMCP):
+    """FastMCP that also sets the MCP isError flag when a tool result reports an error."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        result = await super().call_tool(name, arguments)
+        content, structured = result if isinstance(result, tuple) else (result, None)
+
+        if isinstance(content, dict):
+            return result
+
+        blocks = list(content)
+        if len(blocks) == 1 and isinstance(blocks[0], TextContent) and _is_error_payload(blocks[0].text):
+            return CallToolResult(content=blocks, structuredContent=structured, isError=True)
+
+        return result
+
+
+mcp = ReaderMCP(
     "mcp-reader",
     host="0.0.0.0",
     port=int(os.environ.get("PORT", 8080)),

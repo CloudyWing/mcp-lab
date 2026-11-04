@@ -17,6 +17,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<MailpitTools>();
 
 WebApplication app = builder.Build();

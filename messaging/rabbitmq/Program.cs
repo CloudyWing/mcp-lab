@@ -22,6 +22,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<RabbitMqTools>();
 
 WebApplication app = builder.Build();

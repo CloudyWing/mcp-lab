@@ -33,6 +33,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<ApiContractTools>();
 
 WebApplication app = builder.Build();

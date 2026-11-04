@@ -21,6 +21,7 @@ builder.Services
         }
     )
     .WithHttpTransport()
+    .WithToolErrorFlag()
     .WithTools<OidcTools>();
 
 WebApplication app = builder.Build();
