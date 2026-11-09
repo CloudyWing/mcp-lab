@@ -8,6 +8,8 @@
 | `QUERY_TIMEOUT`、`*_QUERY_TIMEOUT` | runtime | SQL Server 與 Oracle 查詢逾時秒數 |
 | `MAX_ROWS`、`*_MAX_ROWS`、`ES_SEARCH_SIZE` | runtime | 查詢、搜尋或列舉的回傳量限制 |
 | `DOCUMENT_MAX_IMAGES`、`DOCUMENT_MAX_TEXT_MB`、`DOCUMENT_LIST_*`、`DOCUMENT_SEARCH_*`、`DOCUMENT_XLSX_*` | runtime | Reader 文件讀取、列舉、搜尋與 XLSX 解析限制 |
+| `DOCUMENT_MAX_FILE_MB` | runtime | Reader 可解析的非文字檔大小上限（MB），超過時 `read_document` 回錯誤而不解析 |
+| `MCPLAB_MAX_RESPONSE_BYTES` | runtime | 所有 MCP 服務（含 Reader）單次工具回應內容的位元組上限；`scripts/init-config.py` 會寫入每個服務的 `service.env` |
 | `DOCUMENT_HOST_MOUNT_ROOT`、`DOCUMENT_HOST_MOUNT_SOURCE` | build-time | Reader host 路徑根與 Docker volume 掛載來源；修改後需重建或重啟 Compose service |
 | `MCPLAB_RUNTIME_UID`、`MCPLAB_RUNTIME_GID` | build-time | 容器非 root 執行身分；需能讀取 bind mount 的 `config/<服務>/service.env` |
 | `MCPLAB_MCP_TOKEN` | runtime | MCP endpoint 的 Bearer token；留空則不檢查 |
@@ -81,6 +83,49 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `MSSQL_MAX_CELL_CHARS` | `4000` | SQL Server 單一欄位回傳字元上限，允許 1 到 100000 |
 | `ORACLE_MAX_CELL_CHARS` | `4000` | Oracle 單一欄位回傳字元上限，允許 1 到 100000 |
 | `ES_SEARCH_SIZE` | `10` | Elasticsearch 搜尋預設回傳筆數，允許 1 到 1000 |
+| `MCPLAB_MAX_RESPONSE_BYTES` | `1048576` | 單次工具回應內容的位元組上限（1 MiB），允許 1 到 2097152（2 MiB）。適用所有 MCP 服務與 Reader，超限行為見下節 |
+
+### `MCPLAB_MAX_RESPONSE_BYTES` 超限行為
+
+位元組以回應內容計：文字為 UTF-8 長度，圖片與其他 blob 為編碼後長度，不含 JSON 跳脫字元與 MCP 協定外層，因此實際傳輸大小可略高於設定值。設定值每次工具呼叫時才讀取，修改 `service.env` 後不需重啟。內容未超過上限時不會多出任何欄位，JSON 解析後的內容不變；非 ASCII 字元（含中文）與 `<`、`>`、`&`、`'`、`+` 以原字元輸出，不轉義為 `\uXXXX`。
+
+超過上限時依工具分為兩類。
+
+部分結果：`ok` 維持 `true`，回應 `data` 末端新增下列欄位，既有欄位的名稱與意義不變。
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `truncated` | bool | 超限時為 `true`。原本就有 `truncated` 的工具（SQL 查詢、Redis 集合、Mailpit `get_message_source`、Reader）在任一限制造成截斷時皆為 `true` |
+| `original_bytes` | long | 原始內容的位元組數；無法得知時為截斷前已讀取的位元組數 |
+| `original_bytes_exact` | bool | `original_bytes` 為精確值時為 `true`，為已讀取量時為 `false` |
+| `max_response_bytes` | int | 本次生效的 `MCPLAB_MAX_RESPONSE_BYTES` |
+
+明確錯誤：該工具必須取得完整 JSON 才能回應，或回應為頂層陣列而無法在不改變資料形狀的前提下截斷時，`ok` 為 `false`、`isError` 為 `true`，`data` 帶有上述四個欄位，`message` 說明已超過的上限與可調整的設定名稱。
+
+| 服務 | 工具 | 超限結果 |
+| --- | --- | --- |
+| SQL Server、Oracle | `query`、`query_base64`、`execute`、`execute_base64`（SELECT 或 WITH 路徑） | 部分結果：只回傳放得下的完整列，不回傳半列；第一列即超限時回 0 列並提示縮小欄位或調降 `*_MAX_CELL_CHARS`。`original_bytes` 為已讀取量（`original_bytes_exact` 為 `false`） |
+| Redis | `get_key` 字串 | 部分結果：`value` 為前綴，`original_bytes` 為字串的精確長度 |
+| Redis | `get_key` list、set、sorted set、hash | 部分結果：回傳放得下的項目，`truncated` 為 `true`；`REDIS_MAX_ROWS`、`total_count`、`returned_count` 維持原意 |
+| Elasticsearch | `search`、`search_base64` | 部分結果：`total` 為完整命中數，`hits` 只含已完整收到的 hit；沒有任何完整 hit 時 `hits` 為空陣列 |
+| Elasticsearch | `index_document`、`index_document_base64`、`delete_document`、`delete_by_query`、`delete_by_query_base64` | 部分結果：`partial_body` 為回應前綴。操作本身已送出，不以錯誤回報 |
+| Elasticsearch | `ping_connection`、`list_indices`、`get_mapping`、`get_cluster_health` | 明確錯誤 |
+| API Contract | `invoke_endpoint` | 部分結果：有效上限為 `API_CONTRACT_MAX_BODY_BYTES` 與 `MCPLAB_MAX_RESPONSE_BYTES` 的較小者，`body_truncated` 與 `truncated` 皆為 `true` |
+| API Contract | `list_endpoints`、`compare_specs` | 部分結果：清單被截短；`compare_specs` 的 `total_changes`、`breaking_changes` 仍為完整計數 |
+| API Contract | `get_endpoint_schema` | 部分結果：改回 `operation_json_prefix` 字串前綴並省略 `operation` |
+| API Contract | spec 載入 | 不受此設定影響，spec 大小上限固定為 10 MiB，超過時回既有的 `exceeds` 錯誤；同一時間只解析 1 份 spec |
+| OIDC | `get_discovery_document`、`get_jwks`、`validate_jwt` | 明確錯誤，且不寫入快取 |
+| Docker | `ping_docker`、`get_docker_version`、`list_compose_projects`、`list_containers`、`inspect_container`、`get_container_stats` | 明確錯誤 |
+| Docker | `get_container_logs` | 部分結果：`logs` 為前綴（較新的行可能被切掉），可縮小 `tail` |
+| Mailpit | `ping_connection`、`list_messages`、`search_messages`、`wait_for_message`、`get_message_headers` | 明確錯誤 |
+| Mailpit | `get_message_source` | 部分結果：`source` 為前綴，`source_length` 為 `original_bytes` |
+| RabbitMQ | `ping_connection`、`list_queues`、`list_exchanges`、`get_queue_details`、`get_overview` | 明確錯誤 |
+| Mosquitto | `subscribe_once` | 部分結果：`data` 維持頂層陣列，被切短的訊息 payload 為前綴並附 `payload_original_bytes`，預算用完後的後續訊息被忽略。上述四個欄位附在陣列最後一則訊息（`original_bytes_exact` 為 `false`） |
+| Reader | `read_document`、`read_document_text_only` | 部分結果：文字、表格與圖片在預算用完時停止累計。非文字檔過大時為錯誤，見「文件服務」 |
+
+不套用此上限的項目：SQL Server 與 Oracle 的 `list_databases`、`list_tables`、`describe_table`，Redis 的 `get_info`、`list_keys`，以及輸入方向的大字串參數（如 Base64 參數、`publish` 的 `message`、`set_key` 的 `value`）。
+
+各 MCP 服務在 csproj 以 `System.GC.HighMemoryPercent=20` 讓 GC 與 `ArrayPool` 較早回收序列化大回應所保留的緩衝，`mem_limit` 與 `MCPLAB_MAX_RESPONSE_BYTES` 的預設值不因此變動。現場可用環境變數 `DOTNET_GCHighMemPercent`（十六進位，20 為 `0x14`）覆寫。`MCPLAB_MAX_RESPONSE_BYTES` 允許的最大值為 2 MiB（2097152），高於此值在 256m 容器內會因序列化緩衝耗盡記憶體，因此由設定範圍擋下。
 
 ## HTTP 逾時與回應上限
 
@@ -232,7 +277,8 @@ runtime 變數放在 `config/<服務>/service.env`，由容器內服務監聽 `/
 | `DOCUMENT_HOST_MOUNT_ROOT` | `` | Reader 對外接受與回傳的單一 host 掛載根目錄 |
 | `DOCUMENT_HOST_MOUNT_SOURCE` | `DOCUMENT_HOST_MOUNT_ROOT` | Docker Compose 實際掛載到 `/host_root` 的來源路徑；Docker Desktop 從 Windows PowerShell 啟動時可設為 `C:/Workspace` |
 | `DOCUMENT_MAX_IMAGES` | `20` | 圖片最大回傳張數 |
-| `DOCUMENT_MAX_TEXT_MB` | `10` | 文字內容最大回傳大小（MB），設為 `0` 表示不限制 |
+| `DOCUMENT_MAX_TEXT_MB` | `10` | 純文字檔最大讀取大小（MB），設為 `0` 表示不限制；實際讀取量另受 `MCPLAB_MAX_RESPONSE_BYTES` 限制，取兩者較小者 |
+| `DOCUMENT_MAX_FILE_MB` | `20` | 非文字檔（PDF、DOCX、PPTX、XLSX 與圖片）可解析的檔案大小上限（MB），允許 0.1 到 1024，可用小數。超過時 `read_document` 回 `{"error": ..., "size_bytes": ..., "max_file_bytes": ...}` 而不解析，`search_documents` 會跳過該檔 |
 | `DOCUMENT_LIST_DEFAULT_LIMIT` | `100` | `list_documents` 預設最大回傳檔案數 |
 | `DOCUMENT_LIST_MAX_LIMIT` | `1000` | `list_documents` 允許的最大回傳檔案數 |
 | `DOCUMENT_LIST_DEFAULT_DEPTH` | `2` | `list_documents` 遞迴列舉時的預設深度 |

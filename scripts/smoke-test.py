@@ -43,6 +43,11 @@ EXPECTED_SERVICES = [
 OPTIONAL_SERVICES = {"mcp-docker"}
 # The admin UI is checked separately: it mounts the whole config directory and is not an MCP server.
 ADMIN_SERVICE = "mcp-admin"
+RESPONSE_LIMIT_SETTING = "MCPLAB_MAX_RESPONSE_BYTES"
+READER_FILE_LIMIT_SETTING = "DOCUMENT_MAX_FILE_MB"
+DEFAULT_RESPONSE_LIMIT_BYTES = 1048576
+RESPONSE_LIMIT_QUERY_ROWS = 20
+RESPONSE_LIMIT_QUERY = f"SELECT TOP {RESPONSE_LIMIT_QUERY_ROWS} REPLICATE('x', 1000) AS v FROM sys.all_objects"
 
 
 class SmokeError(Exception):
@@ -207,7 +212,8 @@ def main() -> int:
         action="store_true",
         help=(
             "Temporarily edit config/mcp-sql-server/service.env and verify list_connections reflects "
-            "changed, added, and removed connections without a restart."
+            "changed, added, and removed connections, and that MCPLAB_MAX_RESPONSE_BYTES changes truncate "
+            "query results, all without a restart."
         ),
     )
     args = parser.parse_args()
@@ -247,6 +253,10 @@ def main() -> int:
         runner.check(
             "SQL Server MCP reloads service.env changes without restart",
             lambda: check_sql_server_hot_reload(status_by_service, args.timeout_seconds),
+        )
+        runner.check(
+            "SQL Server MCP applies MCPLAB_MAX_RESPONSE_BYTES changes without restart",
+            lambda: check_response_limit_hot_reload(status_by_service, args.timeout_seconds),
         )
     runner.check(
         "Oracle MCP query is read-only and connected",
@@ -288,6 +298,10 @@ def main() -> int:
     runner.check(
         "API Contract MCP reports redirects without following them",
         lambda: check_api_contract_redirect(status_by_service, args.timeout_seconds),
+    )
+    runner.check(
+        "API Contract MCP truncates responses above MCPLAB_MAX_RESPONSE_BYTES",
+        lambda: check_api_contract_big_response(status_by_service, args.timeout_seconds),
     )
     runner.check(
         "OIDC MCP validates signatures and caches provider metadata",
@@ -483,16 +497,32 @@ def check_health_endpoints(status_by_service: dict[str, dict[str, Any]]) -> None
             raise SmokeError(f"{service} returned an invalid health response: {body}")
 
 
-def check_config_status(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
-    problems: list[str] = []
+def fetch_config_status(status_by_service: dict[str, dict[str, Any]], service: str, timeout_seconds: int) -> str:
     token = read_setting("MCPLAB_MCP_TOKEN")
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    url = service_url(status_by_service, service).removesuffix("/mcp") + "/config/status"
+
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout_seconds) as response:
+        return response.read().decode("utf-8")
+
+
+def find_setting(status: dict[str, Any], name: str) -> dict[str, Any] | None:
+    for setting in status.get("settings") or []:
+        if isinstance(setting, dict) and setting.get("name") == name:
+            return setting
+
+    return None
+
+
+def is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def check_config_status(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    problems: list[str] = []
 
     for service in EXPECTED_SERVICES:
-        url = service_url(status_by_service, service).removesuffix("/mcp") + "/config/status"
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout_seconds) as response:
-            body = response.read().decode("utf-8")
-
+        body = fetch_config_status(status_by_service, service, timeout_seconds)
         status = json.loads(body)
         config_file = status.get("config_file") or {}
         if status.get("service") != service:
@@ -506,6 +536,23 @@ def check_config_status(status_by_service: dict[str, dict[str, Any]], timeout_se
                 problems.append(f"{service}: {connection.get('alias')} {connection.get('state')} {connection.get('errors')}")
         for ignored in status.get("ignored_settings") or []:
             problems.append(f"{service}: {ignored.get('key')} ignored ({ignored.get('reason')})")
+
+        max_response = find_setting(status, RESPONSE_LIMIT_SETTING)
+        if max_response is None:
+            problems.append(f"{service}: settings do not include {RESPONSE_LIMIT_SETTING}")
+        else:
+            effective = max_response.get("effective")
+            if not isinstance(effective, int) or isinstance(effective, bool):
+                problems.append(f"{service}: {RESPONSE_LIMIT_SETTING} effective is not an integer: {effective!r}")
+
+        if service == "mcp-reader":
+            max_file = find_setting(status, READER_FILE_LIMIT_SETTING)
+            if max_file is None:
+                problems.append(f"{service}: settings do not include {READER_FILE_LIMIT_SETTING}")
+            elif not is_number(max_file.get("effective")):
+                problems.append(
+                    f"{service}: {READER_FILE_LIMIT_SETTING} effective is not a number: {max_file.get('effective')!r}"
+                )
 
         for secret in read_secret_values(service):
             if secret in body:
@@ -603,6 +650,90 @@ def wait_for_sql_server_host(
     raise SmokeError(f"SQL Server list_connections did not {state} host {expected_host!r}. Last hosts: {last_hosts}")
 
 
+def check_response_limit_hot_reload(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    env_path = service_config_path("mcp-sql-server")
+    if not env_path.exists():
+        raise SkipCheck(f"{env_path.relative_to(REPO_ROOT)} does not exist; run scripts/init-config.py")
+
+    original_content = env_path.read_bytes()
+    original_text = original_content.decode("utf-8-sig")
+    client = create_client(status_by_service, "mcp-sql-server", timeout_seconds)
+    original_limit = read_effective_setting(status_by_service, "mcp-sql-server", RESPONSE_LIMIT_SETTING, timeout_seconds)
+    reduced_limit = 8192
+
+    if not isinstance(original_limit, int) or original_limit < 65536:
+        raise SkipCheck(f"{RESPONSE_LIMIT_SETTING} is {original_limit!r}; the check needs at least 65536 to compare against")
+
+    try:
+        env_path.write_text(set_env_value(original_text, RESPONSE_LIMIT_SETTING, str(reduced_limit)), encoding="utf-8")
+        wait_for_effective_setting(status_by_service, "mcp-sql-server", RESPONSE_LIMIT_SETTING, reduced_limit, timeout_seconds)
+
+        limited = expect_tool_ok(client.call_tool("query", {"sql": RESPONSE_LIMIT_QUERY})).get("data") or {}
+        if limited.get("truncated") is not True:
+            raise SmokeError(f"query was not truncated at {reduced_limit} bytes: {json.dumps(limited)[:500]}")
+
+        returned_count = limited.get("returned_count")
+        if not isinstance(returned_count, int) or returned_count >= RESPONSE_LIMIT_QUERY_ROWS:
+            raise SmokeError(
+                f"query returned {returned_count!r} rows at {reduced_limit} bytes; "
+                f"expected fewer than {RESPONSE_LIMIT_QUERY_ROWS}"
+            )
+
+        if "original_bytes" not in limited:
+            raise SmokeError(f"truncated query response has no original_bytes: {json.dumps(limited)[:500]}")
+    finally:
+        env_path.write_bytes(original_content)
+
+    wait_for_effective_setting(status_by_service, "mcp-sql-server", RESPONSE_LIMIT_SETTING, original_limit, timeout_seconds)
+    restored = expect_tool_ok(client.call_tool("query", {"sql": RESPONSE_LIMIT_QUERY})).get("data") or {}
+    if restored.get("truncated") is not False:
+        raise SmokeError(
+            f"query is still truncated after restoring {RESPONSE_LIMIT_SETTING}: {json.dumps(restored)[:500]}"
+        )
+
+
+def set_env_value(text: str, name: str, value: str) -> str:
+    """Replaces the value of an existing NAME=value line, or appends the line when it is missing."""
+    pattern = re.compile(rf"^{re.escape(name)}=[^\r\n]*", flags=re.MULTILINE)
+    if pattern.search(text):
+        return pattern.sub(f"{name}={value}", text, count=1)
+
+    return text.rstrip("\n") + f"\n{name}={value}\n"
+
+
+def read_effective_setting(
+    status_by_service: dict[str, dict[str, Any]],
+    service: str,
+    name: str,
+    timeout_seconds: int,
+) -> Any:
+    setting = find_setting(json.loads(fetch_config_status(status_by_service, service, timeout_seconds)), name)
+    if setting is None:
+        raise SmokeError(f"{service} /config/status does not list {name}.")
+
+    return setting.get("effective")
+
+
+def wait_for_effective_setting(
+    status_by_service: dict[str, dict[str, Any]],
+    service: str,
+    name: str,
+    expected: Any,
+    timeout_seconds: int,
+) -> None:
+    deadline = time.monotonic() + max(timeout_seconds, 3)
+    last: Any = None
+
+    while time.monotonic() < deadline:
+        last = read_effective_setting(status_by_service, service, name, timeout_seconds)
+        if last == expected:
+            return
+
+        time.sleep(0.2)
+
+    raise SmokeError(f"{service} did not apply {name}={expected!r} without a restart. Last effective value: {last!r}")
+
+
 def check_oracle(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int, include_oracle: bool) -> None:
     if not include_oracle:
         raise SkipCheck("pass --include-oracle when a read-only Oracle target is available")
@@ -671,6 +802,27 @@ def check_api_contract_redirect(status_by_service: dict[str, dict[str, Any]], ti
 
     if not str(data.get("redirect_location", "")).endswith("/items"):
         raise SmokeError(f"invoke_endpoint did not report the redirect location: {data}")
+
+
+def check_api_contract_big_response(status_by_service: dict[str, dict[str, Any]], timeout_seconds: int) -> None:
+    require_test_backends()
+    client = create_client(status_by_service, "mcp-api-contract", timeout_seconds)
+    data = expect_tool_ok(
+        client.call_tool("invoke_endpoint", {"path": "/big", "connection": "LAB", "maxBodyBytes": 10000000})
+    ).get("data") or {}
+
+    if data.get("body_truncated") is not True or data.get("truncated") is not True:
+        raise SmokeError(f"invoke_endpoint did not report truncation for the 2 MiB /big response: {json.dumps(data)[:500]}")
+
+    body_size = len(str(data.get("body", "")).encode("utf-8"))
+    if body_size > DEFAULT_RESPONSE_LIMIT_BYTES:
+        raise SmokeError(
+            f"invoke_endpoint returned {body_size} body bytes, above the default {RESPONSE_LIMIT_SETTING} "
+            f"of {DEFAULT_RESPONSE_LIMIT_BYTES}"
+        )
+
+    if "original_bytes" not in data:
+        raise SmokeError(f"truncated invoke_endpoint response has no original_bytes: {json.dumps(data)[:500]}")
 
 
 def sign_test_jwt(payload: dict[str, Any], kid: str) -> str:

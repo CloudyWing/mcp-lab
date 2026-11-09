@@ -22,7 +22,7 @@ ROOT_ENV_PATH = REPO_ROOT / ".env"
 SERVICE_FILE_NAME = "service.env"
 
 # Keys copied into every service file.
-SHARED_KEYS = re.compile(r"^MCPLAB_MCP_TOKEN$")
+SHARED_KEYS = re.compile(r"^(MCPLAB_MCP_TOKEN|MCPLAB_MAX_RESPONSE_BYTES)$")
 
 SERVICE_KEYS: dict[str, re.Pattern[str]] = {
     "mcp-api-contract": re.compile(r"^API_CONTRACT_"),

@@ -167,7 +167,7 @@ MCP client 設定範例（HTTP transport）：
 
 各 MCP 服務會把 `config/<服務>` 目錄以唯讀方式掛載到容器內 `/app/config`，並由服務進程監聽 `/app/config/service.env`。修改後不需要重啟容器；下一次呼叫 `list_connections()`、`list_runtime_limits()` 或實際查詢工具時會讀取新的 runtime 設定。新增、修改與刪除連線都會生效。
 
-熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`。Compose 與建置階段設定位於根目錄 `.env`，不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
+熱重載涵蓋連線設定與查詢限制，例如 `MSSQL_CONN_*_HOST`、`ORACLE_QUERY_TIMEOUT`、`MSSQL_MAX_ROWS`、`ES_SEARCH_SIZE`、`DOCUMENT_LIST_DEFAULT_LIMIT`、`DOCUMENT_MAX_FILE_MB`，以及所有服務共用的回應大小上限 `MCPLAB_MAX_RESPONSE_BYTES`。Compose 與建置階段設定位於根目錄 `.env`，不熱重載，例如 `*_TAG`、`MCP_*_PORT`、`COMPOSE_PROJECT_NAME`、`DOCKER_SOCKET_PATH`、`TZ`、`MCP_SMOKE_*`。
 
 `service.env` 變更後通常會在 1 秒內生效。若語法錯誤，服務會保留前一份可用設定並輸出 warning log；修正檔案後 watcher 會再次載入。既有請求與 driver connection pool 不會被主動中斷。
 
@@ -225,7 +225,7 @@ python3 scripts/smoke-test.py --check-hot-reload
 
 此腳本會檢查 Compose 容器健康狀態、`read_only`、`cap_drop: [ALL]`、`no-new-privileges`、`/tmp`
 tmpfs、非 root 使用者，並呼叫各 MCP 服務的 ping 或唯讀查詢工具。SQL Server 與 Oracle 會驗證
-`query` 工具拒絕同一段輸入中的寫入語句。加入 `--check-hot-reload` 時，腳本會暫時修改 `config/mcp-sql-server/service.env` 中第一個 `MSSQL_CONN_*_HOST`，並新增後移除一組連線，確認 `list_connections()` 不需重啟就反映修改、新增與刪除，最後還原原檔。
+`query` 工具拒絕同一段輸入中的寫入語句。加入 `--check-hot-reload` 時，腳本會暫時修改 `config/mcp-sql-server/service.env` 中第一個 `MSSQL_CONN_*_HOST`，並新增後移除一組連線，確認 `list_connections()` 不需重啟就反映修改、新增與刪除，最後還原原檔。同一個選項也會把 `MCPLAB_MAX_RESPONSE_BYTES` 暫時調小，確認 `query` 在不重啟的情況下回傳 `truncated`，還原後恢復完整回應。
 
 Oracle 查詢預設略過，因為專案未內建 Oracle 資料庫。若 `config/mcp-oracle/service.env` 已設定可查詢的 Oracle 連線，可明確啟用：
 
@@ -269,7 +269,7 @@ python3 scripts/check-all.py --build-services --smoke --include-oracle
 
 ## 資料服務工具限制
 
-SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避免單次 MCP 呼叫回傳過大內容或長時間卡住。
+SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避免單次 MCP 呼叫回傳過大內容或長時間卡住。所有 MCP 服務與 Reader 另受共用的 `MCPLAB_MAX_RESPONSE_BYTES` 限制單次工具回應的大小，見下方說明。
 
 | 服務 | 變數 | 預設值 | 上限 |
 | --- | --- | --- | --- |
@@ -281,6 +281,7 @@ SQL Server、Oracle 與 Elasticsearch 的查詢回傳量與逾時有上限，避
 | Oracle | `ORACLE_MAX_CELL_CHARS` | 4000 | 100000 |
 | Elasticsearch | `ES_SEARCH_SIZE` / `MAX_ROWS` | 10 | 1000 |
 | Redis | `REDIS_MAX_ROWS` / `MAX_ROWS` | 100 | 1000 |
+| 全部服務 | `MCPLAB_MAX_RESPONSE_BYTES` | 1048576（1 MiB） | 2097152（2 MiB） |
 
 HTTP 逾時與 API Contract 回應上限：
 
@@ -298,7 +299,26 @@ HTTP 逾時與 API Contract 回應上限：
 
 `*_MAX_CELL_CHARS` 限制單一欄位回傳的字元數，超過的部分會截斷並標示原始長度。Redis 的 `get_key` 讀取 list、set、sorted set、hash 時，最多回傳 `REDIS_MAX_ROWS` 筆，並回傳 `total_count` 與 `truncated`。
 
-可用 `list_runtime_limits()` 查詢 SQL Server、Oracle、Elasticsearch、Redis 與 Reader 目前生效的限制值。
+### 回應大小上限
+
+`MCPLAB_MAX_RESPONSE_BYTES` 限制單次工具回應的內容大小（文字為 UTF-8 位元組數，圖片為編碼後長度，不含 JSON 跳脫字元與 MCP 協定外層）。服務在讀取資料來源的過程中計量，超過上限就停止讀取，不會先組好完整結果再截斷，因此在 `mem_limit` 較小的容器中也不會因大結果耗盡記憶體。未超過上限時不會新增任何欄位，JSON 解析後的內容不變；非 ASCII 字元（含中文）與 `<`、`>`、`&`、`'`、`+` 以原字元輸出，不轉義為 `\uXXXX`。允許範圍為 1 至 2097152（2 MiB），超過時 `/config/status` 的 `effective` 夾限為 2097152，管理介面會擋下並顯示「允許範圍 1 到 2097152」。此設定會寫入每個服務的 `service.env`（`scripts/init-config.py` 會複製到全部服務），熱重載後下一次工具呼叫即生效。
+
+超過上限時，多數工具回傳已累計的部分結果，並在 `data` 末端新增下列欄位（既有欄位不變）：
+
+| 欄位 | 說明 |
+| --- | --- |
+| `truncated` | 超限時為 `true`。SQL 查詢、Redis 集合、Mailpit `get_message_source` 與 Reader 原本就有此欄位，任一限制造成截斷時皆為 `true` |
+| `original_bytes` | 原始內容的位元組數；無法得知時為截斷前已讀取的位元組數 |
+| `original_bytes_exact` | `original_bytes` 為精確值時為 `true` |
+| `max_response_bytes` | 本次生效的上限 |
+
+需要完整 JSON 才能回應的工具（OIDC、Docker 除 `get_container_logs` 外、Mailpit 除 `get_message_source` 外、RabbitMQ，以及 Elasticsearch 的 `ping_connection`、`list_indices`、`get_mapping`、`get_cluster_health`）超限時回 `ok: false` 的明確錯誤，`data` 帶有同樣的四個欄位，需調高 `MCPLAB_MAX_RESPONSE_BYTES` 才能取得資料。
+
+SQL Server 與 Oracle 的結果集只回傳放得下的完整列，Redis 字串以前綴回傳，Elasticsearch `search` 只回傳已完整收到的 hit，API Contract 的 `invoke_endpoint` 以 `API_CONTRACT_MAX_BODY_BYTES` 與 `MCPLAB_MAX_RESPONSE_BYTES` 較小者為上限，Mosquitto `subscribe_once` 的 payload 以前綴回傳，回應維持訊息陣列，截斷欄位附在最後一則訊息。API Contract 的 spec 大小上限固定為 10 MiB，同一時間只解析 1 份 spec。各工具的歸類見 [docs/environment-variables.md](./docs/environment-variables.md)。
+
+各 MCP 服務在 csproj 以 `RuntimeHostConfigurationOption` 設定 `System.GC.HighMemoryPercent=20`（輸出至 `*.runtimeconfig.json`），讓 GC 與 `ArrayPool` 較早回收序列化大回應所保留的緩衝。`mem_limit` 與 `MCPLAB_MAX_RESPONSE_BYTES` 的預設值不因此變動。
+
+可用 `list_runtime_limits()` 查詢 SQL Server、Oracle、Elasticsearch、Redis 與 Reader 目前生效的限制值，其中包含 `max_response_bytes`。
 
 ## MCP Tool 回應格式
 
@@ -508,10 +528,12 @@ read_document(path="/home/<你的帳號>/documents/mcp-reader/sample.txt")
 
 ### 大檔說明
 
-- PDF / PPTX / DOCX / XLSX 的常見限制是 MCP client 或終端顯示。
-- 純文字檔才受 `DOCUMENT_MAX_TEXT_MB` 控制；設為 `0` 表示不限制。
+- PDF、DOCX、PPTX、XLSX 與圖片受 `DOCUMENT_MAX_FILE_MB`（預設 20）限制檔案大小，超過時 `read_document` 在解析前回傳 `{"error": ..., "size_bytes": ..., "max_file_bytes": ...}`，`search_documents` 會跳過該檔。
+- 純文字檔受 `DOCUMENT_MAX_TEXT_MB` 控制，設為 `0` 表示不限制；實際讀取量另受 `MCPLAB_MAX_RESPONSE_BYTES` 限制，取兩者較小者，被截斷時回傳 `truncated`、`original_bytes`（檔案大小）等欄位。
+- 所有檔案類型的回應內容（文字、表格、base64 圖片）合計超過 `MCPLAB_MAX_RESPONSE_BYTES` 時，Reader 在預算用完處停止累計並回傳 `truncated` 欄位，不再繼續解析後續內容。
+- 同一時間只解析 1 個檔案，其餘請求排隊等待；`search_documents` 逐檔解析，掃描檔案數越多耗時越長。
+- XLSX 以唯讀串流方式讀取，記憶體不隨檔案大小線性成長，並預設限制列數與儲存格數。
 - 若回應太大，優先用 `start_page` / `end_page` 分段讀 PDF、PPTX。
-- XLSX 讀取預設限制列數與儲存格數，避免一次回傳整本大型工作簿。
 
 ### 列舉與搜尋限制
 
