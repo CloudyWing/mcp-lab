@@ -34,7 +34,7 @@ services:
       - shared_net
 
   test-redis:
-    image: redis:7.4-alpine
+    image: redis:8.10-alpine
     # Port 6380 serves TLS with the self-signed certificate that run.py generates.
     command: ["redis-server", "--requirepass", "labpass", "--tls-port", "6380",
               "--tls-cert-file", "/certs/server.crt", "--tls-key-file", "/certs/server.key",
