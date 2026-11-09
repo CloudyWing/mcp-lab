@@ -2,7 +2,7 @@
 # with the MCP stack). Credentials here are for throwaway test containers only.
 services:
   test-mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: Lab_Passw0rd!
