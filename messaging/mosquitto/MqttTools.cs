@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.Mosquitto;
 
 /// <summary>
@@ -5,14 +7,29 @@ namespace CloudyWing.McpLab.Mosquitto;
 /// </summary>
 [McpServerToolType]
 public sealed class MqttTools {
+    private static readonly string[] StatusInterestKeys = [
+        "version", "uptime", "clients/connected",
+        "messages/received", "messages/sent",
+        "bytes/received", "bytes/sent",
+    ];
+
     private readonly ConnectionRegistry registry;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MqttTools"/> with the specified connection registry.
     /// </summary>
-    public MqttTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider used to read MCPLAB_MAX_RESPONSE_BYTES.</param>
+    public MqttTools(ConnectionRegistry registry, IDotEnvSnapshotProvider snapshotProvider) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+
         this.registry = registry;
+        this.snapshotProvider = snapshotProvider;
     }
+
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
 
     /// <summary>
     /// 列出所有已設定的 MQTT 連線
@@ -120,17 +137,18 @@ public sealed class MqttTools {
         [Description("連線名稱")] string connection = ""
     ) {
         try {
-            List<object> messages = [];
-            TaskCompletionSource<bool> tcs = new();
+            int maxResponseBytes = MaxResponseBytes;
+            MqttPayloadCollector collector = new(new ResponseBudget(maxResponseBytes));
+            TaskCompletionSource<bool> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             IMqttClient client = await registry.ConnectAsync(connection);
 
             client.ApplicationMessageReceivedAsync += e => {
-                messages.Add(new {
-                    topic = e.ApplicationMessage.Topic,
-                    payload = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment),
-                    qos = (int)e.ApplicationMessage.QualityOfServiceLevel,
-                });
+                collector.Add(
+                    e.ApplicationMessage.Topic,
+                    e.ApplicationMessage.PayloadSegment,
+                    (int)e.ApplicationMessage.QualityOfServiceLevel
+                );
                 tcs.TrySetResult(true);
                 return Task.CompletedTask;
             };
@@ -145,9 +163,15 @@ public sealed class MqttTools {
             await client.DisconnectAsync();
             client.Dispose();
 
-            return messages.Count > 0
-                ? ToolResponse.Ok(messages)
-                : ToolResponse.Empty("No message received within timeout.", messages);
+            IReadOnlyList<object> data = collector.CreateResponseData(maxResponseBytes);
+
+            if (data.Count == 0) {
+                return ToolResponse.Empty("No message received within timeout.", data);
+            }
+
+            return collector.Truncated
+                ? ToolResponse.Ok(data, ResponseTruncation.Message(collector.ObservedBytes, false, maxResponseBytes))
+                : ToolResponse.Ok(data);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -161,14 +185,17 @@ public sealed class MqttTools {
         [Description("連線名稱")] string connection = ""
     ) {
         Dictionary<string, string> stats = new();
+        ResponseBudget budget = new(MaxResponseBytes);
+        object syncRoot = new();
 
         try {
             IMqttClient client = await registry.ConnectAsync(connection);
 
             client.ApplicationMessageReceivedAsync += e => {
-                string key = e.ApplicationMessage.Topic;
-                string val = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-                stats[key] = val;
+                lock (syncRoot) {
+                    RecordStatus(stats, budget, e.ApplicationMessage.Topic, e.ApplicationMessage.PayloadSegment);
+                }
+
                 return Task.CompletedTask;
             };
 
@@ -182,17 +209,13 @@ public sealed class MqttTools {
             await client.DisconnectAsync();
             client.Dispose();
 
-            string[] interestKeys = [
-                "version", "uptime", "clients/connected",
-                "messages/received", "messages/sent",
-                "bytes/received", "bytes/sent",
-            ];
+            Dictionary<string, string> output;
 
-            IOrderedEnumerable<KeyValuePair<string, string>> filtered = stats
-                .Where(kv => interestKeys.Any(k => kv.Key.Contains(k)))
-                .OrderBy(kv => kv.Key);
-
-            Dictionary<string, string> output = filtered.ToDictionary(kv => kv.Key, kv => kv.Value);
+            lock (syncRoot) {
+                output = stats
+                    .OrderBy(kv => kv.Key)
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
 
             return output.Count > 0
                 ? ToolResponse.Ok(output)
@@ -200,5 +223,33 @@ public sealed class MqttTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    /// <summary>
+    /// Records a <c>$SYS</c> message when its topic matches one of the broker status keys.
+    /// Topics that match no key are dropped without decoding the payload, and the payload of a kept topic is cut to the budget.
+    /// The caller must synchronize access to <paramref name="stats"/> and <paramref name="budget"/>.
+    /// </summary>
+    /// <param name="stats">The status values collected so far, keyed by topic.</param>
+    /// <param name="budget">The budget that limits the payload bytes of the kept messages.</param>
+    /// <param name="topic">The topic the message was published to.</param>
+    /// <param name="payload">The raw payload bytes.</param>
+    /// <returns><see langword="true"/> when the message was kept; otherwise <see langword="false"/>.</returns>
+    public static bool RecordStatus(
+        IDictionary<string, string> stats,
+        ResponseBudget budget,
+        string topic,
+        ArraySegment<byte> payload
+    ) {
+        ArgumentNullException.ThrowIfNull(stats);
+        ArgumentNullException.ThrowIfNull(budget);
+
+        if (!StatusInterestKeys.Any(k => topic.Contains(k))) {
+            return false;
+        }
+
+        long accepted = budget.TakeUpTo(payload.Count);
+        stats[topic] = Utf8Text.DecodePrefix(payload.AsSpan(0, (int)accepted), accepted < payload.Count);
+        return true;
     }
 }
