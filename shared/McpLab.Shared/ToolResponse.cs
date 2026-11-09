@@ -7,8 +7,6 @@ namespace CloudyWing.McpLab.Shared;
 /// Creates consistent JSON envelopes for MCP tool responses.
 /// </summary>
 public static class ToolResponse {
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
-
     /// <summary>
     /// Creates a successful response.
     /// </summary>
@@ -35,8 +33,18 @@ public static class ToolResponse {
 
     /// <summary>
     /// Creates an error response from an exception.
+    /// A <see cref="ResponseTooLargeException"/> carries the truncation fields in <c>data</c>.
     /// </summary>
-    public static string Error(Exception exception) => Error(exception.Message);
+    public static string Error(Exception exception) {
+        if (exception is ResponseTooLargeException tooLarge) {
+            return Error(
+                tooLarge.Message,
+                ResponseTruncation.ErrorData(tooLarge.OriginalBytes, tooLarge.OriginalBytesExact, tooLarge.MaxResponseBytes)
+            );
+        }
+
+        return Error(exception.Message);
+    }
 
     private static string Create(bool ok, string kind, string message, object? data) {
         return JsonSerializer.Serialize(new {
@@ -44,7 +52,7 @@ public static class ToolResponse {
             kind,
             message = SensitiveDataSanitizer.Redact(message),
             data = RedactData(data),
-        }, Json);
+        }, ToolJson.Options);
     }
 
     private static JsonNode? RedactData(object? data) {
@@ -52,7 +60,7 @@ public static class ToolResponse {
             return null;
         }
 
-        JsonNode? node = JsonSerializer.SerializeToNode(data, Json);
+        JsonNode? node = JsonSerializer.SerializeToNode(data, ToolJson.Options);
         RedactNode(node);
 
         return node;

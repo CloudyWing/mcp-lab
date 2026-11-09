@@ -37,7 +37,10 @@ public static class ServiceCatalog {
     /// <summary>
     /// Keys written to every service file.
     /// </summary>
-    public static IReadOnlyList<string> SharedKeys { get; } = [McpAccessToken.VariableName];
+    public static IReadOnlyList<string> SharedKeys { get; } = [
+        McpAccessToken.VariableName,
+        ServiceSettings.Common.MaxResponseBytes.Name
+    ];
 
     /// <summary>
     /// Gets every managed service, in navigation order.
@@ -47,13 +50,13 @@ public static class ServiceCatalog {
         new("mcp-oracle", "Oracle", "資料庫", ConnectionSchemas.Oracle, ServiceSettings.Oracle.All, "ping_connection", []),
         new("mcp-elasticsearch", "Elasticsearch", "資料庫", ConnectionSchemas.Elasticsearch, ServiceSettings.Elasticsearch.All, "ping_connection", []),
         new("mcp-redis", "Redis", "資料庫", ConnectionSchemas.Redis, ServiceSettings.Redis.All, "ping_connection", []),
-        new("mcp-mosquitto", "MQTT", "訊息", ConnectionSchemas.Mqtt, [], "ping_connection", []),
+        new("mcp-mosquitto", "MQTT", "訊息", ConnectionSchemas.Mqtt, ServiceSettings.Mosquitto.All, "ping_connection", []),
         new("mcp-rabbitmq", "RabbitMQ", "訊息", ConnectionSchemas.RabbitMq, ServiceSettings.RabbitMq.All, "ping_connection", []),
         new("mcp-api-contract", "API Contract", "API 與身分", ConnectionSchemas.ApiContract, ServiceSettings.ApiContract.All, "get_spec_summary", []),
         new("mcp-oidc", "OIDC", "API 與身分", ConnectionSchemas.Oidc, ServiceSettings.Oidc.All, "get_discovery_document", []),
         new("mcp-mailpit", "Mailpit", "工具", ConnectionSchemas.Mailpit, ServiceSettings.Mailpit.All, "ping_connection", []),
         new("mcp-reader", "Reader", "工具", null, [], null, ["DOCUMENT_", "MAX_IMAGES", "MAX_TEXT_MB"]),
-        new("mcp-docker", "Docker", "工具", null, [], null, []),
+        new("mcp-docker", "Docker", "工具", null, ServiceSettings.Docker.All, null, []),
     ];
 
     /// <summary>

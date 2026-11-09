@@ -229,7 +229,7 @@ internal sealed class AdminConfigTests {
         await store.WriteAsync("mcp-redis", "# existing\nREDIS_MAX_ROWS=50\n");
         const string env = "MCP_SQL_SERVER_PORT=9800\nMSSQL_CONN_A_HOST=db\nMSSQL_CONN_A_USER=sa\nMSSQL_CONN_A_PASSWORD=pw\n"
             + "REDIS_CONN_L_HOST=redis\nMCPLAB_MCP_TOKEN=tok\nDOCUMENT_HOST_MOUNT_ROOT=/docs\nDOCUMENT_MAX_IMAGES=5\nMAX_ROWS=10\nUNKNOWN_KEY=1\n"
-            + "MSSQL_CONN_MY_DB_HOST=x\n";
+            + "MSSQL_CONN_MY_DB_HOST=x\nMCPLAB_MAX_RESPONSE_BYTES=2048\n";
 
         ImportPreview preview = EnvImporter.Preview(env, store);
         Dictionary<string, ImportItem> items = preview.Items.ToDictionary(item => item.Key);
@@ -241,6 +241,7 @@ internal sealed class AdminConfigTests {
             Assert.That(items["DOCUMENT_MAX_IMAGES"].Services, Is.EqualTo(new[] { "mcp-reader" }));
             Assert.That(items["MAX_ROWS"].Services, Is.EquivalentTo(new[] { "mcp-sql-server", "mcp-oracle", "mcp-elasticsearch", "mcp-redis" }));
             Assert.That(items["MCPLAB_MCP_TOKEN"].Services, Has.Count.EqualTo(ServiceCatalog.All.Count));
+            Assert.That(items["MCPLAB_MAX_RESPONSE_BYTES"].Services, Has.Count.EqualTo(ServiceCatalog.All.Count));
             Assert.That(items["MSSQL_CONN_A_PASSWORD"].IsSecret, Is.True);
             Assert.That(preview.MergedFiles["mcp-redis"], Does.StartWith("# existing\nREDIS_MAX_ROWS=50\n"));
             Assert.That(preview.Checks.Single(check => check.Service == "mcp-sql-server").Ignored.Single().Key, Is.EqualTo("MSSQL_CONN_MY_DB_HOST"));

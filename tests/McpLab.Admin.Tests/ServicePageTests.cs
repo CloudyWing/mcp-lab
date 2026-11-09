@@ -127,6 +127,32 @@ internal sealed class ServicePageTests : AdminTestContext {
     }
 
     [Test]
+    public void Render_Mosquitto_ShowsMaxResponseBytesSetting() {
+        WriteConfig("mcp-mosquitto", "");
+
+        IRenderedComponent<ContainerFragment> cut = RenderWithProviders<ServicePage>(("Name", "mcp-mosquitto"));
+
+        cut.WaitForAssertion(() => {
+            Assert.That(cut.FindAll(".settings-grid input"), Is.Not.Empty);
+            Assert.That(Input(cut, "MCPLAB_MAX_RESPONSE_BYTES"), Is.Not.Null);
+        }, Wait);
+    }
+
+    [TestCase("99999999")]
+    [TestCase("2097153")]
+    public async Task SaveSettings_MosquittoMaxResponseBytesOutOfRange_ShowsRangeErrorAndKeepsFile(string input) {
+        WriteConfig("mcp-mosquitto", "");
+        IRenderedComponent<ContainerFragment> cut = RenderWithProviders<ServicePage>(("Name", "mcp-mosquitto"));
+        cut.WaitForAssertion(() => Assert.That(cut.FindAll(".settings-grid input"), Is.Not.Empty), Wait);
+
+        Input(cut, "MCPLAB_MAX_RESPONSE_BYTES").Input(input);
+        await Button(cut, "儲存服務設定").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.That(cut.Find(".settings-grid").TextContent, Does.Contain("允許範圍 1 到 2097152")), Wait);
+        Assert.That(Store.Read("mcp-mosquitto"), Does.Not.Contain("MCPLAB_MAX_RESPONSE_BYTES"));
+    }
+
+    [Test]
     public async Task DeleteConnection_Confirmed_RemovesOnlyThatAlias() {
         WriteConfig("mcp-redis", RedisConfig);
         IRenderedComponent<ContainerFragment> cut = RenderWithProviders<ServicePage>(("Name", "mcp-redis"));

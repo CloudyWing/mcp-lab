@@ -7,9 +7,19 @@ public static class OpenApiDriftDetector {
     /// <summary>
     /// Compares <paramref name="baseline"/> against <paramref name="candidate"/>.
     /// </summary>
-    public static IReadOnlyList<ApiContractChange> Compare(OpenApiSpec baseline, OpenApiSpec candidate) {
-        Dictionary<string, OpenApiEndpoint> baselineMap = new(baseline.GetEndpointMap(), StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, OpenApiEndpoint> candidateMap = new(candidate.GetEndpointMap(), StringComparer.OrdinalIgnoreCase);
+    public static IReadOnlyList<ApiContractChange> Compare(OpenApiSpec baseline, OpenApiSpec candidate) =>
+        Compare(baseline.GetEndpointMap(), candidate.GetEndpointMap());
+
+    /// <summary>
+    /// Compares endpoint maps, as returned by <see cref="OpenApiSpec.GetEndpointMap"/>, so that callers
+    /// do not need to keep both parsed specifications alive.
+    /// </summary>
+    public static IReadOnlyList<ApiContractChange> Compare(
+        IReadOnlyDictionary<string, OpenApiEndpoint> baseline,
+        IReadOnlyDictionary<string, OpenApiEndpoint> candidate
+    ) {
+        Dictionary<string, OpenApiEndpoint> baselineMap = new(baseline, StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, OpenApiEndpoint> candidateMap = new(candidate, StringComparer.OrdinalIgnoreCase);
         List<ApiContractChange> changes = [];
 
         foreach ((string key, OpenApiEndpoint baselineEndpoint) in baselineMap) {

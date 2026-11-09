@@ -41,6 +41,13 @@ public static class ServiceSettings {
     private static readonly string[] QueryTimeoutFallback = ["QUERY_TIMEOUT"];
     private static readonly string[] MaxRowsFallback = ["MAX_ROWS"];
 
+    /// <summary>Settings shared by every MCP service.</summary>
+    public static class Common {
+        /// <summary>Largest total content bytes of a single tool response.</summary>
+        public static readonly ServiceSetting MaxResponseBytes =
+            new("MCPLAB_MAX_RESPONSE_BYTES", "單次工具回應的內容位元組上限", "bytes", 1_048_576, 1, 2_097_152);
+    }
+
     /// <summary>SQL Server settings.</summary>
     public static class SqlServer {
         /// <summary>Query timeout.</summary>
@@ -56,7 +63,7 @@ public static class ServiceSettings {
             new("MSSQL_MAX_CELL_CHARS", "單一欄位回傳字元上限", "chars", SqlResultSetReader.DefaultMaxCellChars, 1, SqlResultSetReader.MaxCellCharsLimit);
 
         /// <summary>All SQL Server settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [QueryTimeout, MaxRows, MaxCellChars];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [QueryTimeout, MaxRows, MaxCellChars, Common.MaxResponseBytes];
     }
 
     /// <summary>Oracle settings.</summary>
@@ -74,7 +81,7 @@ public static class ServiceSettings {
             new("ORACLE_MAX_CELL_CHARS", "單一欄位回傳字元上限", "chars", SqlResultSetReader.DefaultMaxCellChars, 1, SqlResultSetReader.MaxCellCharsLimit);
 
         /// <summary>All Oracle settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [QueryTimeout, MaxRows, MaxCellChars];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [QueryTimeout, MaxRows, MaxCellChars, Common.MaxResponseBytes];
     }
 
     /// <summary>Elasticsearch settings.</summary>
@@ -88,7 +95,7 @@ public static class ServiceSettings {
             new("ES_HTTP_TIMEOUT", "HTTP 請求逾時", "seconds", 30, 1, 300);
 
         /// <summary>All Elasticsearch settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [SearchSize, HttpTimeout];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [SearchSize, HttpTimeout, Common.MaxResponseBytes];
     }
 
     /// <summary>Redis settings.</summary>
@@ -98,7 +105,7 @@ public static class ServiceSettings {
             new("REDIS_MAX_ROWS", "列舉 key 與集合項目的最大回傳筆數", "items", 100, 1, 1000, MaxRowsFallback);
 
         /// <summary>All Redis settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [MaxRows];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [MaxRows, Common.MaxResponseBytes];
     }
 
     /// <summary>API Contract settings.</summary>
@@ -116,7 +123,7 @@ public static class ServiceSettings {
             new("API_CONTRACT_MAX_BODY_BYTES", "invoke_endpoint 可要求的 body 位元組上限", "bytes", 200000, 1, 10_000_000);
 
         /// <summary>All API Contract settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, DefaultBodyBytes, MaxBodyBytes];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, DefaultBodyBytes, MaxBodyBytes, Common.MaxResponseBytes];
     }
 
     /// <summary>OIDC settings.</summary>
@@ -130,7 +137,7 @@ public static class ServiceSettings {
             new("OIDC_METADATA_CACHE_SECONDS", "Discovery 與 JWKS 的快取秒數，0 表示不快取", "seconds", 300, 0, 86400);
 
         /// <summary>All OIDC settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, MetadataCacheSeconds];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, MetadataCacheSeconds, Common.MaxResponseBytes];
     }
 
     /// <summary>RabbitMQ settings.</summary>
@@ -140,7 +147,7 @@ public static class ServiceSettings {
             new("RABBITMQ_HTTP_TIMEOUT", "Management API 的 HTTP 逾時", "seconds", 10, 1, 300);
 
         /// <summary>All RabbitMQ settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, Common.MaxResponseBytes];
     }
 
     /// <summary>Mailpit settings.</summary>
@@ -150,7 +157,19 @@ public static class ServiceSettings {
             new("MAILPIT_HTTP_TIMEOUT", "Mailpit API 的 HTTP 逾時", "seconds", 10, 1, 300);
 
         /// <summary>All Mailpit settings.</summary>
-        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout];
+        public static IReadOnlyList<ServiceSetting> All { get; } = [HttpTimeout, Common.MaxResponseBytes];
+    }
+
+    /// <summary>Mosquitto settings.</summary>
+    public static class Mosquitto {
+        /// <summary>All Mosquitto settings.</summary>
+        public static IReadOnlyList<ServiceSetting> All { get; } = [Common.MaxResponseBytes];
+    }
+
+    /// <summary>Docker settings.</summary>
+    public static class Docker {
+        /// <summary>All Docker settings.</summary>
+        public static IReadOnlyList<ServiceSetting> All { get; } = [Common.MaxResponseBytes];
     }
 
     /// <summary>
@@ -165,6 +184,8 @@ public static class ServiceSettings {
         "mcp-oidc" => Oidc.All,
         "mcp-rabbitmq" => RabbitMq.All,
         "mcp-mailpit" => Mailpit.All,
+        "mcp-mosquitto" => Mosquitto.All,
+        "mcp-docker" => Docker.All,
         _ => [],
     };
 }

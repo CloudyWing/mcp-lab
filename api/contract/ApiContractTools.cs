@@ -34,6 +34,8 @@ public sealed class ApiContractTools {
     private IReadOnlyDictionary<string, string> Settings =>
         snapshotProvider?.Current ?? new Dictionary<string, string>();
 
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(Settings);
+
     /// <summary>
     /// Lists all configured API contract profiles.
     /// </summary>
@@ -50,21 +52,24 @@ public sealed class ApiContractTools {
     ) {
         try {
             ConnectionConfig cfg = registry.Get(connection);
-            OpenApiSpec spec = await specClient.LoadSpecAsync(cfg).ConfigureAwait(false);
-            IReadOnlyList<OpenApiEndpoint> endpoints = spec.ListEndpoints(limit: MaxListLimit);
+            object summary = await specClient.WithSpecAsync<object>(cfg, spec => {
+                IReadOnlyList<OpenApiEndpoint> endpoints = spec.ListEndpoints(limit: MaxListLimit);
 
-            return ToolResponse.Ok(new {
-                connection = ToConnectionSummary(cfg),
-                title = spec.Title,
-                version = spec.InfoVersion,
-                openapi = spec.Version,
-                server_url = GetBaseUrl(cfg, spec),
-                paths = spec.Root["paths"]?.AsObject().Count ?? 0,
-                operations = endpoints.Count,
-                methods = endpoints
-                    .GroupBy(endpoint => endpoint.Method)
-                    .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
-            });
+                return new {
+                    connection = ToConnectionSummary(cfg),
+                    title = spec.Title,
+                    version = spec.InfoVersion,
+                    openapi = spec.Version,
+                    server_url = GetBaseUrl(cfg, spec),
+                    paths = spec.Root["paths"]?.AsObject().Count ?? 0,
+                    operations = endpoints.Count,
+                    methods = endpoints
+                        .GroupBy(endpoint => endpoint.Method)
+                        .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
+                };
+            }).ConfigureAwait(false);
+
+            return ToolResponse.Ok(summary);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -84,11 +89,30 @@ public sealed class ApiContractTools {
         try {
             int safeLimit = NormalizeLimit(limit);
             ConnectionConfig cfg = registry.Get(connection);
-            OpenApiSpec spec = await specClient.LoadSpecAsync(cfg).ConfigureAwait(false);
-            IReadOnlyList<OpenApiEndpoint> endpoints = spec.ListEndpoints(pathPrefix, method, tag, safeLimit);
+            IReadOnlyList<OpenApiEndpoint> endpoints = await specClient
+                .WithSpecAsync(cfg, spec => spec.ListEndpoints(pathPrefix, method, tag, safeLimit))
+                .ConfigureAwait(false);
 
-            return endpoints.Count == 0
-                ? ToolResponse.Empty("No endpoints found.", new { limit = safeLimit })
+            if (endpoints.Count == 0) {
+                return ToolResponse.Empty("No endpoints found.", new { limit = safeLimit });
+            }
+
+            ResponseBudget budget = new(MaxResponseBytes);
+            List<OpenApiEndpoint> kept = [];
+
+            foreach (OpenApiEndpoint endpoint in endpoints) {
+                if (!budget.TryAddJson(endpoint)) {
+                    break;
+                }
+
+                kept.Add(endpoint);
+            }
+
+            return budget.Exhausted
+                ? ToolResponse.Ok(
+                    ResponseTruncation.Append(new { limit = safeLimit, endpoints = kept }, budget),
+                    ResponseTruncation.Message(budget.ObservedBytes, false, budget.MaxBytes)
+                )
                 : ToolResponse.Ok(new { limit = safeLimit, endpoints });
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
@@ -106,13 +130,36 @@ public sealed class ApiContractTools {
     ) {
         try {
             ConnectionConfig cfg = registry.Get(connection);
-            OpenApiSpec spec = await specClient.LoadSpecAsync(cfg).ConfigureAwait(false);
+            string operationJson = await specClient
+                .WithSpecAsync(cfg, spec => spec.GetOperationJson(path, method))
+                .ConfigureAwait(false);
+            string upperMethod = method.ToUpperInvariant();
+            int maxResponseBytes = MaxResponseBytes;
+            int operationBytes = ResponseBudget.Utf8Size(operationJson);
 
-            return ToolResponse.Ok(new {
-                path,
-                method = method.ToUpperInvariant(),
-                operation = JsonNode.Parse(spec.GetOperationJson(path, method)),
-            });
+            if (operationBytes <= maxResponseBytes) {
+                return ToolResponse.Ok(new {
+                    path,
+                    method = upperMethod,
+                    operation = JsonNode.Parse(operationJson),
+                });
+            }
+
+            byte[] utf8 = Encoding.UTF8.GetBytes(operationJson);
+
+            return ToolResponse.Ok(
+                ResponseTruncation.Append(
+                    new {
+                        path,
+                        method = upperMethod,
+                        operation_json_prefix = Utf8Text.DecodePrefix(utf8.AsSpan(0, maxResponseBytes), truncated: true),
+                    },
+                    operationBytes,
+                    true,
+                    maxResponseBytes
+                ),
+                ResponseTruncation.Message(operationBytes, true, maxResponseBytes)
+            );
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -130,9 +177,13 @@ public sealed class ApiContractTools {
         try {
             ConnectionConfig baselineCfg = registry.Get(baselineConnection);
             ConnectionConfig candidateCfg = registry.Get(candidateConnection);
-            OpenApiSpec baseline = await specClient.LoadSpecAsync(baselineCfg).ConfigureAwait(false);
-            OpenApiSpec candidate = await specClient.LoadSpecAsync(candidateCfg).ConfigureAwait(false);
-            IReadOnlyList<ApiContractChange> changes = OpenApiDriftDetector.Compare(baseline, candidate);
+            IReadOnlyDictionary<string, OpenApiEndpoint> baselineMap = await specClient
+                .WithSpecAsync(baselineCfg, spec => spec.GetEndpointMap())
+                .ConfigureAwait(false);
+            IReadOnlyDictionary<string, OpenApiEndpoint> candidateMap = await specClient
+                .WithSpecAsync(candidateCfg, spec => spec.GetEndpointMap())
+                .ConfigureAwait(false);
+            IReadOnlyList<ApiContractChange> changes = OpenApiDriftDetector.Compare(baselineMap, candidateMap);
 
             if (breakingOnly) {
                 changes = changes
@@ -140,14 +191,34 @@ public sealed class ApiContractTools {
                     .ToArray();
             }
 
-            return ToolResponse.Ok(new {
+            int breakingChanges = changes.Count(change => change.Severity == "breaking");
+            int totalChanges = changes.Count;
+            ResponseBudget budget = new(MaxResponseBytes);
+            List<ApiContractChange> kept = [];
+
+            foreach (ApiContractChange change in changes) {
+                if (!budget.TryAddJson(change)) {
+                    break;
+                }
+
+                kept.Add(change);
+            }
+
+            var data = new {
                 baseline = baselineCfg.Name,
                 candidate = candidateCfg.Name,
                 breaking_only = breakingOnly,
-                breaking_changes = changes.Count(change => change.Severity == "breaking"),
-                total_changes = changes.Count,
-                changes,
-            });
+                breaking_changes = breakingChanges,
+                total_changes = totalChanges,
+                changes = (IReadOnlyList<ApiContractChange>)kept,
+            };
+
+            return budget.Exhausted
+                ? ToolResponse.Ok(
+                    ResponseTruncation.Append(data, budget),
+                    ResponseTruncation.Message(budget.ObservedBytes, false, budget.MaxBytes)
+                )
+                : ToolResponse.Ok(data);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -195,8 +266,10 @@ public sealed class ApiContractTools {
                 );
             }
 
-            OpenApiSpec spec = await specClient.LoadSpecAsync(cfg).ConfigureAwait(false);
-            Uri url = BuildUrl(GetBaseUrl(cfg, spec), path, pathParametersJson, queryJson);
+            (string baseUrl, IReadOnlyList<string> responseKeys) = await specClient
+                .WithSpecAsync(cfg, spec => (GetBaseUrl(cfg, spec), spec.GetResponseKeys(path, normalizedMethod)))
+                .ConfigureAwait(false);
+            Uri url = BuildUrl(baseUrl, path, pathParametersJson, queryJson);
             using HttpClient http = registry.CreateClient(cfg);
             using HttpRequestMessage request = new(new HttpMethod(normalizedMethod), url);
             ApplyAuthAndHeaders(cfg, request, headersJson);
@@ -205,27 +278,53 @@ public sealed class ApiContractTools {
                 request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
             }
 
-            using HttpResponseMessage response = await http
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+            int maxResponseBytes = MaxResponseBytes;
+            using BoundedResponse bounded = await BoundedHttpContent
+                .SendAsync(http, request, Math.Min(safeMaxBodyBytes, maxResponseBytes))
                 .ConfigureAwait(false);
-            (byte[] bytes, bool truncated) = await BoundedHttpContent
-                .ReadAsync(response.Content, safeMaxBodyBytes)
-                .ConfigureAwait(false);
-            string body = Encoding.UTF8.GetString(bytes);
-
-            return ToolResponse.Ok(new {
+            HttpResponseMessage response = bounded.Response;
+            bool truncated = bounded.Body.Truncated;
+            string body = bounded.Body.ToText();
+            var data = new {
                 url = url.ToString(),
                 method = normalizedMethod,
                 status_code = (int)response.StatusCode,
-                status_defined_in_spec = IsStatusDefined(spec, path, normalizedMethod, (int)response.StatusCode),
+                status_defined_in_spec = OpenApiSpec.IsStatusDefined(responseKeys, (int)response.StatusCode),
                 content_type = response.Content.Headers.ContentType?.MediaType ?? "",
                 redirect_location = response.Headers.Location?.ToString(),
                 body_truncated = truncated,
                 body,
-            });
+            };
+
+            return CreateInvokeResponse(data, bounded.Body, safeMaxBodyBytes, maxResponseBytes);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    /// <summary>
+    /// Creates the <c>invoke_endpoint</c> response. When the body was cut, the truncation fields report the limit
+    /// that was in effect, which is the smaller of <paramref name="maxBodyBytes"/> and <paramref name="maxResponseBytes"/>.
+    /// </summary>
+    /// <param name="data">The response data that serializes to a JSON object.</param>
+    /// <param name="body">The body that was read with the effective limit.</param>
+    /// <param name="maxBodyBytes">The body limit of the call.</param>
+    /// <param name="maxResponseBytes">The configured response limit.</param>
+    public static string CreateInvokeResponse(object data, BoundedBody body, int maxBodyBytes, int maxResponseBytes) {
+        if (!body.Truncated) {
+            return ToolResponse.Ok(data);
+        }
+
+        // 回應本文被截斷：任一限制（maxBodyBytes 或 MCPLAB_MAX_RESPONSE_BYTES）造成截斷皆附上截斷欄位，
+        // max_response_bytes 回報實際生效的上限。
+        int effectiveLimit = Math.Min(maxBodyBytes, maxResponseBytes);
+
+        return maxBodyBytes >= maxResponseBytes
+            ? ToolResponse.Ok(
+                ResponseTruncation.Append(data, body, effectiveLimit),
+                ResponseTruncation.Message(body.OriginalBytes, body.OriginalBytesExact, effectiveLimit)
+            )
+            : ToolResponse.Ok(ResponseTruncation.Append(data, body, effectiveLimit));
     }
 
     /// <summary>
@@ -248,15 +347,17 @@ public sealed class ApiContractTools {
                 MaxIssueLimit
             );
             ConnectionConfig cfg = registry.Get(connection);
-            OpenApiSpec spec = await specClient.LoadSpecAsync(cfg).ConfigureAwait(false);
-            IReadOnlyList<string> issues = ApiResponseValidator.Validate(
-                spec,
-                path,
-                method,
-                statusCode,
-                responseBody,
-                safeMaxIssues
-            );
+            IReadOnlyList<string> issues = await specClient.WithSpecAsync(
+                cfg,
+                spec => ApiResponseValidator.Validate(
+                    spec,
+                    path,
+                    method,
+                    statusCode,
+                    responseBody,
+                    safeMaxIssues
+                )
+            ).ConfigureAwait(false);
 
             return ToolResponse.Ok(new {
                 valid = issues.Count == 0,
@@ -362,12 +463,4 @@ public sealed class ApiContractTools {
         method.Equals("GET", StringComparison.OrdinalIgnoreCase)
         || method.Equals("HEAD", StringComparison.OrdinalIgnoreCase)
         || method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsStatusDefined(OpenApiSpec spec, string path, string method, int statusCode) {
-        try {
-            return spec.GetResponse(path, method, statusCode) is not null;
-        } catch (KeyNotFoundException) {
-            return false;
-        }
-    }
 }

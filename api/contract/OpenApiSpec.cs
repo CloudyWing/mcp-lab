@@ -4,7 +4,6 @@ namespace CloudyWing.McpLab.ApiContract;
 /// Represents a parsed OpenAPI JSON or YAML document.
 /// </summary>
 public sealed class OpenApiSpec {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
     private static readonly IDeserializer YamlDeserializer = new DeserializerBuilder().Build();
     private static readonly ISerializer YamlJsonSerializer = new SerializerBuilder().JsonCompatible().Build();
 
@@ -35,9 +34,24 @@ public sealed class OpenApiSpec {
     /// <summary>
     /// Parses an OpenAPI JSON or YAML document.
     /// </summary>
-    public static OpenApiSpec Parse(string text) {
-        JsonNode? node = TryParseJson(text) ?? ParseYaml(text);
+    public static OpenApiSpec Parse(string text) =>
+        FromNode(TryParseJson(text) ?? ParseYaml(text));
 
+    /// <summary>
+    /// Parses an OpenAPI JSON or YAML document from UTF-8 bytes.
+    /// JSON is parsed directly from the bytes; other content is decoded to a string and parsed as YAML.
+    /// </summary>
+    public static OpenApiSpec ParseUtf8(byte[] utf8) {
+        ArgumentNullException.ThrowIfNull(utf8);
+
+        try {
+            return FromNode(JsonNode.Parse(utf8));
+        } catch (JsonException) {
+            return Parse(DecodeUtf8(utf8));
+        }
+    }
+
+    private static OpenApiSpec FromNode(JsonNode? node) {
         if (node is not JsonObject root) {
             throw new InvalidOperationException("OpenAPI document root must be an object.");
         }
@@ -103,7 +117,7 @@ public sealed class OpenApiSpec {
     /// Gets the raw JSON for an operation.
     /// </summary>
     public string GetOperationJson(string path, string method) =>
-        GetOperation(path, method).ToJsonString(JsonOptions);
+        GetOperation(path, method).ToJsonString(ToolJson.Options);
 
     /// <summary>
     /// Gets the response object for an operation and status code.
@@ -122,6 +136,34 @@ public sealed class OpenApiSpec {
         }
 
         return responses["default"] as JsonObject;
+    }
+
+    /// <summary>
+    /// Gets the response keys (status codes and <c>default</c>) of an operation, or an empty list when the path or method is absent.
+    /// </summary>
+    public IReadOnlyList<string> GetResponseKeys(string path, string method) {
+        if (GetPaths()[path] is not JsonObject pathItem
+            || pathItem[method.ToLowerInvariant()] is not JsonObject operation
+            || operation["responses"] is not JsonObject responses
+        ) {
+            return [];
+        }
+
+        return responses
+            .Where(response => response.Value is JsonObject)
+            .Select(response => response.Key)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Determines whether response keys define a status code, either exactly or through <c>default</c>.
+    /// </summary>
+    public static bool IsStatusDefined(IEnumerable<string> responseKeys, int statusCode) {
+        ArgumentNullException.ThrowIfNull(responseKeys);
+
+        string statusKey = statusCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        return responseKeys.Any(key => key == statusKey || key == "default");
     }
 
     /// <summary>
@@ -191,6 +233,13 @@ public sealed class OpenApiSpec {
         || name.Equals("head", StringComparison.OrdinalIgnoreCase)
         || name.Equals("options", StringComparison.OrdinalIgnoreCase)
         || name.Equals("trace", StringComparison.OrdinalIgnoreCase);
+
+    private static string DecodeUtf8(byte[] utf8) {
+        ReadOnlySpan<byte> bom = [0xEF, 0xBB, 0xBF];
+        int offset = utf8.AsSpan().StartsWith(bom) ? bom.Length : 0;
+
+        return Encoding.UTF8.GetString(utf8, offset, utf8.Length - offset);
+    }
 
     private static JsonNode? TryParseJson(string text) {
         try {
