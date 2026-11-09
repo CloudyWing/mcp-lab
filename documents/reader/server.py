@@ -5,10 +5,13 @@ mcp-reader — Document & image reader MCP server.
 
 import base64
 import chardet
+import codecs
 import hmac
 import json
+import math
 import os
 import re
+import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +21,7 @@ from dotenv_watcher import DotEnvSnapshot, DotEnvWatcher
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 from mcp.types import CallToolResult, TextContent
+from response_budget import ResponseBudget, utf8_size
 
 FastMCPSettings.model_config["env_file"] = None
 
@@ -164,6 +168,8 @@ READER_SETTINGS: dict[str, ReaderSetting] = {
         ReaderSetting("DOCUMENT_XLSX_MAX_ROWS", "XLSX 預設讀取列數", "rows", 1000, 1, "DOCUMENT_XLSX_MAX_ROWS_LIMIT"),
         ReaderSetting("DOCUMENT_XLSX_MAX_CELLS_LIMIT", "XLSX 可要求的儲存格上限", "cells", 200000, 1, 10000000),
         ReaderSetting("DOCUMENT_XLSX_MAX_CELLS", "XLSX 預設讀取儲存格數", "cells", 20000, 1, "DOCUMENT_XLSX_MAX_CELLS_LIMIT"),
+        ReaderSetting("MCPLAB_MAX_RESPONSE_BYTES", "單次工具回應內容的位元組上限，超過時截斷", "bytes", 1048576, 1, 2097152),
+        ReaderSetting("DOCUMENT_MAX_FILE_MB", "可解析的檔案大小上限，超過時回錯誤", "MB", 20, 0.1, 1024, (), True),
     )
 }
 
@@ -235,6 +241,14 @@ def _xlsx_max_cells_limit() -> int:
 
 def _xlsx_default_max_cells() -> int:
     return _read_setting("DOCUMENT_XLSX_MAX_CELLS")
+
+
+def _max_response_bytes() -> int:
+    return _read_setting("MCPLAB_MAX_RESPONSE_BYTES")
+
+
+def _max_file_mb() -> float:
+    return _read_setting("DOCUMENT_MAX_FILE_MB")
 
 
 def _map_host_path(source_path: str) -> Path | None:
@@ -383,7 +397,31 @@ def _img_to_b64(img_bytes: bytes, fmt: str = "png") -> str:
     return f"data:image/{fmt};base64," + base64.b64encode(img_bytes).decode()
 
 
-def _parse_pdf(path: Path, include_images: bool, start_page: int, end_page: int) -> dict:
+def _img_b64_size(blob_size: int, fmt: str = "png") -> int:
+    """回傳 _img_to_b64 產生的字串長度（皆為 ASCII），供編碼前以預算判斷。"""
+    return len(f"data:image/{fmt};base64,") + ((blob_size + 2) // 3) * 4
+
+
+_PDF_IMAGE_SCALE = 1.5
+_PNG_FIXED_BYTES = 57
+_DEFLATE_MAX_RATIO = 1032
+
+
+def _min_png_size(width_px: int, height_px: int) -> int:
+    """回傳寬高為 width_px 乘 height_px 的 PNG 不可能小於的位元組數，供渲染前判斷圖片必然放不下。
+
+    以每像素 1 位元組的原始掃描線資料，除以 deflate 的最大壓縮比 1032，再加 PNG 固定結構，
+    因此任何色彩類型的實際輸出都不會小於此值。
+    """
+    raw_bytes = max(height_px, 1) * (1 + max(width_px, 1))
+    return _PNG_FIXED_BYTES + raw_bytes // _DEFLATE_MAX_RATIO
+
+
+# FastMCP 1.30.0 的 Tool.run 在事件迴圈執行緒直接呼叫同步工具函式；鎖在直接呼叫與 thread pool 兩種執行緒模型下都能序列化解析。
+_PARSE_LOCK = threading.Lock()
+
+
+def _parse_pdf(path: Path, include_images: bool, start_page: int, end_page: int, budget: ResponseBudget) -> dict:
     import fitz
 
     document = fitz.open(str(path))
@@ -391,26 +429,51 @@ def _parse_pdf(path: Path, include_images: bool, start_page: int, end_page: int)
     p_start = max(0, start_page - 1)
     p_end   = (min(end_page, total) - 1) if end_page > 0 else (total - 1)
     pages, images_b64 = [], []
+    images_open = include_images
     for i in range(p_start, p_end + 1):
+        if budget.closed:
+            budget.mark_incomplete()
+            break
+
         page     = document[i]
         page_num = i + 1
-        text     = page.get_text("text").strip()
-        if include_images and len(images_b64) < _max_images():
-            matrix = fitz.Matrix(1.5, 1.5)
-            pixmap = page.get_pixmap(matrix=matrix)
-            images_b64.append({"page": page_num, "image": _img_to_b64(pixmap.tobytes("png"))})
+        text     = budget.take_text(page.get_text("text").strip())
         pages.append({"page": page_num, "text": text})
+        if images_open and len(images_b64) < _max_images():
+            if budget.closed:
+                images_open = False
+                budget.mark_incomplete()
+                continue
+
+            min_image_size = _img_b64_size(_min_png_size(
+                math.ceil(page.rect.width * _PDF_IMAGE_SCALE),
+                math.ceil(page.rect.height * _PDF_IMAGE_SCALE),
+            ))
+            if min_image_size > budget.remaining:
+                # 圖片最小可能大小已超過剩餘預算，不渲染 pixmap 與 PNG；以最小大小提供預算，必然被拒絕並記錄被略過的大小。
+                budget.try_add(min_image_size)
+                images_open = False
+                continue
+
+            matrix = fitz.Matrix(_PDF_IMAGE_SCALE, _PDF_IMAGE_SCALE)
+            pixmap = page.get_pixmap(matrix=matrix)
+            png_bytes = pixmap.tobytes("png")
+            if budget.try_add(_img_b64_size(len(png_bytes))):
+                images_b64.append({"page": page_num, "image": _img_to_b64(png_bytes)})
+            else:
+                images_open = False
     document.close()
+    returned_end = pages[-1]["page"] if pages else p_end + 1
     return {
         "type": "pdf",
         "total_pages": total,
-        "returned_pages": f"{p_start + 1}-{p_end + 1}",
+        "returned_pages": f"{p_start + 1}-{returned_end}",
         "pages": pages,
         "images": images_b64,
     }
 
 
-def _parse_pptx(path: Path, include_images: bool, start_page: int, end_page: int) -> dict:
+def _parse_pptx(path: Path, include_images: bool, start_page: int, end_page: int, budget: ResponseBudget) -> dict:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -419,43 +482,83 @@ def _parse_pptx(path: Path, include_images: bool, start_page: int, end_page: int
     s_start = max(0, start_page - 1)
     s_end   = (min(end_page, total) - 1) if end_page > 0 else (total - 1)
     slides, images_b64 = [], []
+    images_open = include_images
     for i in range(s_start, s_end + 1):
+        if budget.closed:
+            budget.mark_incomplete()
+            break
+
         slide     = prs.slides[i]
         slide_num = i + 1
         texts, slide_images = [], []
         for shape in slide.shapes:
+            if budget.closed:
+                budget.mark_incomplete()
+                break
+
             if getattr(shape, "has_text_frame", False):
                 for para in shape.text_frame.paragraphs:
                     line = "".join(run.text for run in para.runs).strip()
                     if line:
-                        texts.append(line)
-            if include_images and len(images_b64) < _max_images() and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
+                        texts.append(budget.take_text(line))
+                        if budget.closed:
+                            break
+            if images_open and len(images_b64) < _max_images() and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     img_bytes = shape.image.blob
                     img_fmt   = shape.image.ext.lower().lstrip(".")
                     if img_fmt == "jpg":
                         img_fmt = "jpeg"
-                    encoded = _img_to_b64(img_bytes, img_fmt)
-                    slide_images.append(encoded)
-                    images_b64.append({"slide": slide_num, "image": encoded})
+                    # 同一個編碼字串會同時出現在 slides 與頂層 images，回應內容含兩份。
+                    if budget.try_add(2 * _img_b64_size(len(img_bytes), img_fmt)):
+                        encoded = _img_to_b64(img_bytes, img_fmt)
+                        slide_images.append(encoded)
+                        images_b64.append({"slide": slide_num, "image": encoded})
+                    else:
+                        images_open = False
                 except Exception:
                     pass
-        title = slide.shapes.title.text if slide.shapes.title else ""
+        title = budget.take_text(slide.shapes.title.text if slide.shapes.title else "")
         slides.append({"slide": slide_num, "title": title, "texts": texts, "images": slide_images})
+    returned_end = slides[-1]["slide"] if slides else s_end + 1
     return {
         "type": "pptx",
         "total_slides": total,
-        "returned_slides": f"{s_start + 1}-{s_end + 1}",
+        "returned_slides": f"{s_start + 1}-{returned_end}",
         "slides": slides,
         "images": images_b64,
     }
 
 
-def _parse_docx(path: Path, include_images: bool) -> dict:
+def _parse_docx(path: Path, include_images: bool, budget: ResponseBudget) -> dict:
     import docx
 
     doc        = docx.Document(str(path))
-    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    paragraphs = []
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if not text:
+            continue
+        if budget.closed:
+            budget.mark_incomplete()
+            break
+        paragraphs.append(budget.take_text(text))
+
+    tables = []
+    for table in doc.tables:
+        if budget.closed:
+            budget.mark_incomplete()
+            break
+
+        rows = []
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if not budget.try_add(sum(utf8_size(cell) for cell in cells)):
+                budget.mark_incomplete()
+                break
+            rows.append(cells)
+        tables.append(rows)
+
     images_b64 = []
     if include_images:
         for rel in doc.part.rels.values():
@@ -465,44 +568,51 @@ def _parse_docx(path: Path, include_images: bool) -> dict:
                     img_fmt   = rel.target_part.content_type.split("/")[-1]
                     if img_fmt == "jpg":
                         img_fmt = "jpeg"
+                    if not budget.try_add(_img_b64_size(len(img_bytes), img_fmt)):
+                        break
                     images_b64.append({"index": len(images_b64) + 1, "image": _img_to_b64(img_bytes, img_fmt)})
                 except Exception:
                     pass
-    tables = []
-    for table in doc.tables:
-        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
-        tables.append(rows)
     return {"type": "docx", "paragraphs": paragraphs, "tables": tables, "images": images_b64}
 
 
-def _parse_xlsx(path: Path, max_rows: int, max_cells: int) -> dict:
+def _parse_xlsx(path: Path, max_rows: int, max_cells: int, budget: ResponseBudget) -> dict:
     from openpyxl import load_workbook
 
-    wb = load_workbook(str(path), data_only=True)
-    total_sheet_count = len(wb.sheetnames)
-    sheets = []
-    total_rows = 0
-    total_cells = 0
-    truncated = False
+    wb = load_workbook(str(path), read_only=True, data_only=True)
+    try:
+        total_sheet_count = len(wb.sheetnames)
+        sheets = []
+        total_rows = 0
+        total_cells = 0
+        truncated = False
 
-    for name in wb.sheetnames:
-        ws = wb[name]
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            if total_rows >= max_rows or total_cells + len(row) > max_cells:
-                truncated = True
+        for name in wb.sheetnames:
+            ws = wb[name]
+            ws.reset_dimensions()
+            rows = []
+            for row in ws.iter_rows(values_only=True):
+                if total_rows >= max_rows or total_cells + len(row) > max_cells:
+                    truncated = True
+                    break
+
+                values = [str(c) if c is not None else "" for c in row]
+                if not budget.try_add(sum(utf8_size(value) for value in values)):
+                    budget.mark_incomplete()
+                    truncated = True
+                    break
+
+                rows.append(values)
+                total_rows += 1
+                total_cells += len(row)
+
+            sheets.append({"sheet": name, "rows": rows})
+
+            if truncated:
                 break
+    finally:
+        wb.close()
 
-            rows.append([str(c) if c is not None else "" for c in row])
-            total_rows += 1
-            total_cells += len(row)
-
-        sheets.append({"sheet": name, "rows": rows})
-
-        if truncated:
-            break
-
-    wb.close()
     return {
         "type": "xlsx",
         "sheet_count": total_sheet_count,
@@ -514,10 +624,11 @@ def _parse_xlsx(path: Path, max_rows: int, max_cells: int) -> dict:
     }
 
 
-def _parse_image(path: Path) -> dict:
+def _parse_image(path: Path, budget: ResponseBudget) -> dict:
     from PIL import Image
     import io
 
+    size_bytes = path.stat().st_size
     with Image.open(str(path)) as img:
         width, height = img.size
         fmt      = img.format or path.suffix.lstrip(".").upper()
@@ -525,53 +636,65 @@ def _parse_image(path: Path) -> dict:
         if mime_fmt in ("jpg",):
             mime_fmt = "jpeg"
 
-        buf = io.BytesIO()
-        save_fmt = "PNG" if fmt in ("", "ICO", "ICNS") else fmt
-        try:
-            img.save(buf, format=save_fmt)
-        except Exception:
-            img.convert("RGB").save(buf, format="PNG")
-            mime_fmt = "png"
-        image_b64 = _img_to_b64(buf.getvalue(), mime_fmt)
+        image_b64 = None
+        if size_bytes <= budget.remaining:
+            buf = io.BytesIO()
+            save_fmt = "PNG" if fmt in ("", "ICO", "ICNS") else fmt
+            try:
+                img.save(buf, format=save_fmt)
+            except Exception:
+                img.convert("RGB").save(buf, format="PNG")
+                mime_fmt = "png"
+            blob = buf.getvalue()
+            if budget.try_add(_img_b64_size(len(blob), mime_fmt)):
+                image_b64 = _img_to_b64(blob, mime_fmt)
+        else:
+            # 檔案本身已超過剩餘預算，不解碼像素也不重新編碼；以編碼後大小提供預算，必然被拒絕並記錄被略過的大小。
+            budget.try_add(_img_b64_size(size_bytes, mime_fmt))
 
     result: dict[str, Any] = {
         "type":       "image",
         "format":     fmt,
         "width":      width,
         "height":     height,
-        "size_bytes": path.stat().st_size,
-        "image":      image_b64,
-        "images":     [],
+        "size_bytes": size_bytes,
     }
+    if image_b64 is not None:
+        result["image"] = image_b64
+    result["images"] = []
 
     try:
         import pytesseract
         ocr_text = pytesseract.image_to_string(str(path), lang="chi_tra+chi_sim+eng").strip()
         if ocr_text:
-            result["ocr_text"] = ocr_text
+            result["ocr_text"] = budget.take_text(ocr_text)
     except Exception:
         pass
 
     return result
 
 
-def _parse_text(path: Path) -> dict:
+def _parse_text(path: Path, budget: ResponseBudget) -> dict:
     size_bytes = path.stat().st_size
     max_text_mb = _max_text_mb()
     max_bytes  = int(max_text_mb * 1024 * 1024) if max_text_mb > 0 else 0
-    truncated  = max_bytes > 0 and size_bytes > max_bytes
+    budget_bytes = budget.remaining
+    read_limit = min(max_bytes, budget_bytes) if max_bytes > 0 else budget_bytes
 
-    if max_bytes <= 0:
-        raw = path.read_bytes()
-    else:
-        with path.open("rb") as file:
-            raw = file.read(max_bytes)
+    with path.open("rb") as file:
+        raw = file.read(read_limit)
+    truncated = size_bytes > len(raw)
+
     detected = chardet.detect(raw)
     encoding = detected.get("encoding") or "utf-8"
     try:
-        content = raw.decode(encoding, errors="replace")
+        content = codecs.getincrementaldecoder(encoding)(errors="replace").decode(raw, final=not truncated)
     except Exception:
         content = raw.decode("utf-8", errors="replace")
+
+    content = budget.take_text(content)
+    if truncated and read_limit == budget_bytes:
+        budget.mark_incomplete(original_bytes=size_bytes, original_bytes_exact=True)
 
     return {
         "type":       "text",
@@ -652,6 +775,8 @@ def list_runtime_limits() -> dict:
         "document_xlsx_max_rows_limit": _xlsx_max_rows_limit(),
         "document_xlsx_max_cells": _xlsx_default_max_cells(),
         "document_xlsx_max_cells_limit": _xlsx_max_cells_limit(),
+        "max_response_bytes": _max_response_bytes(),
+        "document_max_file_mb": _max_file_mb(),
     }
 
 
@@ -757,23 +882,38 @@ def read_document(
         return json.dumps({"error": f"Unsupported format: {ext}"}, ensure_ascii=False)
 
     try:
-        if ext == ".pdf":
-            result = _parse_pdf(file_path, include_images, start_page, end_page)
-        elif ext == ".pptx":
-            result = _parse_pptx(file_path, include_images, start_page, end_page)
-        elif ext == ".docx":
-            result = _parse_docx(file_path, include_images)
-        elif ext == ".xlsx":
-            safe_rows = _clamp_int(xlsx_max_rows, _xlsx_default_max_rows(), 1, _xlsx_max_rows_limit())
-            safe_cells = _clamp_int(xlsx_max_cells, _xlsx_default_max_cells(), 1, _xlsx_max_cells_limit())
-            result = _parse_xlsx(file_path, safe_rows, safe_cells)
-        elif ext in IMAGE_EXTS:
-            result = _parse_image(file_path)
-        else:
-            result = _parse_text(file_path)
+        if ext in DOCUMENT_EXTS or ext in IMAGE_EXTS:
+            size_bytes = file_path.stat().st_size
+            max_file_mb = _max_file_mb()
+            max_file_bytes = int(max_file_mb * 1024 * 1024)
+            if size_bytes > max_file_bytes:
+                return json.dumps({
+                    "error": f"File too large: {size_bytes / 1024 / 1024:.2f} MB exceeds DOCUMENT_MAX_FILE_MB={max_file_mb:g}",
+                    "size_bytes": size_bytes,
+                    "max_file_bytes": max_file_bytes,
+                }, ensure_ascii=False)
+
+        budget = ResponseBudget(_max_response_bytes())
+        with _PARSE_LOCK:
+            if ext == ".pdf":
+                result = _parse_pdf(file_path, include_images, start_page, end_page, budget)
+            elif ext == ".pptx":
+                result = _parse_pptx(file_path, include_images, start_page, end_page, budget)
+            elif ext == ".docx":
+                result = _parse_docx(file_path, include_images, budget)
+            elif ext == ".xlsx":
+                safe_rows = _clamp_int(xlsx_max_rows, _xlsx_default_max_rows(), 1, _xlsx_max_rows_limit())
+                safe_cells = _clamp_int(xlsx_max_cells, _xlsx_default_max_cells(), 1, _xlsx_max_cells_limit())
+                result = _parse_xlsx(file_path, safe_rows, safe_cells, budget)
+            elif ext in IMAGE_EXTS:
+                result = _parse_image(file_path, budget)
+            else:
+                result = _parse_text(file_path, budget)
 
         result["path"]        = _relative_path_for(file_path)
         result["image_count"] = len(result.get("images", []))
+        if budget.exhausted:
+            result.update(budget.fields())
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
@@ -843,6 +983,9 @@ def search_documents(
         try:
             content = json.loads(read_document_text_only(doc["path"]))
         except Exception:
+            continue
+
+        if isinstance(content, dict) and content.get("error"):
             continue
 
         text_blob = json.dumps(content, ensure_ascii=False)

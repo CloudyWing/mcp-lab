@@ -14,6 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY dotenv_watcher.py .
+COPY response_budget.py .
 COPY server.py .
 USER appuser
 EXPOSE 8080
