@@ -189,13 +189,22 @@ public sealed class DockerTools {
             int safeTail = ToolRuntimeOptions.NormalizeRequestedInt32(tail, DefaultLogTail, 1, MaxLogTail);
             string path = $"/containers/{EscapeSegment(container)}/logs?stdout=true&stderr=true"
                 + $"&timestamps={timestamps.ToString().ToLowerInvariant()}&tail={safeTail}";
-            byte[] bytes = await client.GetBytesAsync(path).ConfigureAwait(false);
-            string logs = DockerLogStream.Decode(bytes);
+            BoundedBody body = await client.GetBoundedAsync(path).ConfigureAwait(false);
+            string logs = DockerLogStream.Decode(body.Bytes, partial: body.Truncated);
             object data = new {
                 container,
                 tail = safeTail,
                 logs,
             };
+
+            if (body.Truncated) {
+                int maxResponseBytes = client.MaxResponseBytes;
+
+                return ToolResponse.Ok(
+                    ResponseTruncation.Append(data, body, maxResponseBytes),
+                    ResponseTruncation.Message(body.OriginalBytes, body.OriginalBytesExact, maxResponseBytes)
+                );
+            }
 
             return string.IsNullOrEmpty(logs)
                 ? ToolResponse.Empty("No logs returned.", data)

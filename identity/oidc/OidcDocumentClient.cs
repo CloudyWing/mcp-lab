@@ -102,16 +102,19 @@ public sealed class OidcDocumentClient {
     private async Task<string> FetchAsync(string url) {
         using HttpClient http = httpClientFactory.CreateClient(ConnectionRegistry.ClientKey);
         http.Timeout = ServiceSettings.Oidc.HttpTimeout.ReadSeconds(Settings);
-        using HttpResponseMessage response = await http.GetAsync(url).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        int maxBytes = ServiceSettings.Common.MaxResponseBytes.Read(Settings);
+        using BoundedResponse response = await BoundedHttpContent.GetAsync(http, url, maxBytes).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode) {
+            string errorBody = response.Body.ToText();
+
             throw new InvalidOperationException(
-                $"OIDC metadata endpoint returned HTTP {(int)response.StatusCode}: {body[..Math.Min(body.Length, 500)]}"
+                $"OIDC metadata endpoint returned HTTP {(int)response.Response.StatusCode}: {errorBody[..Math.Min(errorBody.Length, 500)]}"
             );
         }
 
-        return body;
+        // A truncated discovery document or key set cannot be validated against, so it is never returned or cached.
+        return response.Body.RequireComplete(maxBytes);
     }
 
     private static void EnsureAllowedMetadataUrl(string url, bool requireHttpsMetadata) {

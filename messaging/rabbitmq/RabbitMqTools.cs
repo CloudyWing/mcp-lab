@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.RabbitMq;
 
 /// <summary>
@@ -6,13 +8,22 @@ namespace CloudyWing.McpLab.RabbitMq;
 [McpServerToolType]
 public sealed class RabbitMqTools {
     private readonly ConnectionRegistry registry;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="RabbitMqTools"/> with the specified connection registry.
     /// </summary>
-    public RabbitMqTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider used to read MCPLAB_MAX_RESPONSE_BYTES.</param>
+    public RabbitMqTools(ConnectionRegistry registry, IDotEnvSnapshotProvider snapshotProvider) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+
         this.registry = registry;
+        this.snapshotProvider = snapshotProvider;
     }
+
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
 
     /// <summary>
     /// 列出所有已設定的 RabbitMQ 連線
@@ -40,7 +51,7 @@ public sealed class RabbitMqTools {
         try {
             using HttpClient http = registry.CreateClient(connection);
 
-            string body = await http.GetStringAsync("api/whoami");
+            string body = await GetJsonTextAsync(http, "api/whoami");
             JsonNode? node = JsonNode.Parse(body);
 
             return ToolResponse.Ok(new {
@@ -63,7 +74,7 @@ public sealed class RabbitMqTools {
         try {
             using HttpClient http = registry.CreateClient(connection);
 
-            string body = await http.GetStringAsync($"api/queues/{Uri.EscapeDataString(vhost)}");
+            string body = await GetJsonTextAsync(http, $"api/queues/{Uri.EscapeDataString(vhost)}");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
             List<object> queues = [];
 
@@ -94,7 +105,7 @@ public sealed class RabbitMqTools {
         try {
             using HttpClient http = registry.CreateClient(connection);
 
-            string body = await http.GetStringAsync($"api/exchanges/{Uri.EscapeDataString(vhost)}");
+            string body = await GetJsonTextAsync(http, $"api/exchanges/{Uri.EscapeDataString(vhost)}");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
             List<object> exchanges = [];
 
@@ -130,7 +141,8 @@ public sealed class RabbitMqTools {
         try {
             using HttpClient http = registry.CreateClient(connection);
 
-            string body = await http.GetStringAsync(
+            string body = await GetJsonTextAsync(
+                http,
                 $"api/queues/{Uri.EscapeDataString(vhost)}/{Uri.EscapeDataString(queue)}"
             );
             JsonNode? node = JsonNode.Parse(body);
@@ -161,7 +173,7 @@ public sealed class RabbitMqTools {
         try {
             using HttpClient http = registry.CreateClient(connection);
 
-            string body = await http.GetStringAsync("api/overview");
+            string body = await GetJsonTextAsync(http, "api/overview");
             JsonNode? node = JsonNode.Parse(body);
 
             object summary = new {
@@ -205,10 +217,14 @@ public sealed class RabbitMqTools {
             });
             string url = $"api/exchanges/{Uri.EscapeDataString(vhost)}/{Uri.EscapeDataString(exchange)}/publish";
 
-            HttpResponseMessage resp = await http.PostAsync(url,
-                new StringContent(payload, Encoding.UTF8, "application/json"));
-            resp.EnsureSuccessStatusCode();
-            bool routed = IsRouted(await resp.Content.ReadAsStringAsync());
+            using HttpRequestMessage request = new(HttpMethod.Post, url) {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            using BoundedResponse resp = await BoundedHttpContent.SendAsync(http, request, MaxResponseBytes);
+            resp.Response.EnsureSuccessStatusCode();
+
+            // The publish response is a few bytes; a body past the limit is treated as not routed.
+            bool routed = !resp.Body.Truncated && IsRouted(resp.Body.ToText());
             object data = new {
                 exchange,
                 routing_key = routingKey,
@@ -221,6 +237,15 @@ public sealed class RabbitMqTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    private async Task<string> GetJsonTextAsync(HttpClient http, string path) {
+        int maxBytes = MaxResponseBytes;
+        using BoundedResponse response = await BoundedHttpContent.GetAsync(http, path, maxBytes);
+        response.Response.EnsureSuccessStatusCode();
+
+        // A JSON document cut at the limit cannot be summarized, so exceeding it is an error.
+        return response.Body.RequireComplete(maxBytes);
     }
 
     /// <summary>

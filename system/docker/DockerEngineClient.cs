@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.Docker;
 
 /// <summary>
@@ -6,46 +8,56 @@ namespace CloudyWing.McpLab.Docker;
 public sealed class DockerEngineClient {
     private const string DefaultSocketPath = "/var/run/docker.sock";
     private readonly HttpClient http;
+    private readonly IDotEnvSnapshotProvider? snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DockerEngineClient"/> using <c>DOCKER_HOST</c> (for example
     /// <c>tcp://mcp-docker-proxy:2375</c>) when set, otherwise the Docker socket at <c>DOCKER_SOCKET_PATH</c>.
     /// </summary>
-    public DockerEngineClient() : this(CreateHttpClient()) {
+    /// <param name="snapshotProvider">The .env snapshot provider used to read MCPLAB_MAX_RESPONSE_BYTES.</param>
+    public DockerEngineClient(IDotEnvSnapshotProvider snapshotProvider) : this(CreateHttpClient(), snapshotProvider) {
     }
 
     /// <summary>
     /// Initializes a new instance of <see cref="DockerEngineClient"/> using the specified HTTP client.
     /// </summary>
-    public DockerEngineClient(HttpClient http) {
+    /// <param name="http">The HTTP client that reaches Docker Engine.</param>
+    /// <param name="snapshotProvider">
+    /// The .env snapshot provider used to read MCPLAB_MAX_RESPONSE_BYTES; the default limit applies when omitted.
+    /// </param>
+    public DockerEngineClient(HttpClient http, IDotEnvSnapshotProvider? snapshotProvider = null) {
         this.http = http;
+        this.snapshotProvider = snapshotProvider;
     }
+
+    /// <summary>
+    /// Gets the effective response limit, read from the current snapshot on every call.
+    /// </summary>
+    public int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(
+        snapshotProvider?.Current ?? new Dictionary<string, string>()
+    );
 
     /// <summary>
     /// Gets a plain text response from Docker Engine.
     /// </summary>
+    /// <exception cref="ResponseTooLargeException">The response is larger than <see cref="MaxResponseBytes"/>.</exception>
     public async Task<string> GetStringAsync(string path) {
-        using HttpResponseMessage response = await http.GetAsync(path).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        EnsureSuccess(response, body);
+        int maxBytes = MaxResponseBytes;
+        BoundedBody body = await GetBoundedAsync(path, maxBytes).ConfigureAwait(false);
 
-        return body;
+        return body.RequireComplete(maxBytes);
     }
 
     /// <summary>
-    /// Gets a binary response from Docker Engine.
+    /// Gets a binary response from Docker Engine, reading at most <see cref="MaxResponseBytes"/> bytes.
+    /// A longer response is returned as a truncated body instead of an exception.
     /// </summary>
-    public async Task<byte[]> GetBytesAsync(string path) {
-        using HttpResponseMessage response = await http.GetAsync(path).ConfigureAwait(false);
-        byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-        EnsureSuccess(response, Encoding.UTF8.GetString(body));
-
-        return body;
-    }
+    public Task<BoundedBody> GetBoundedAsync(string path) => GetBoundedAsync(path, MaxResponseBytes);
 
     /// <summary>
     /// Gets a JSON object response from Docker Engine.
     /// </summary>
+    /// <exception cref="ResponseTooLargeException">The response is larger than <see cref="MaxResponseBytes"/>.</exception>
     public async Task<JsonObject> GetObjectAsync(string path) {
         string body = await GetStringAsync(path).ConfigureAwait(false);
 
@@ -56,6 +68,7 @@ public sealed class DockerEngineClient {
     /// <summary>
     /// Gets a JSON array response from Docker Engine.
     /// </summary>
+    /// <exception cref="ResponseTooLargeException">The response is larger than <see cref="MaxResponseBytes"/>.</exception>
     public async Task<JsonArray> GetArrayAsync(string path) {
         string body = await GetStringAsync(path).ConfigureAwait(false);
 
@@ -78,6 +91,13 @@ public sealed class DockerEngineClient {
         return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Scheme is "http" or "https"
             ? uri
             : throw new InvalidOperationException($"DOCKER_HOST must be tcp://host:port, http://host:port, or unix://path (got '{dockerHost}').");
+    }
+
+    private async Task<BoundedBody> GetBoundedAsync(string path, int maxBytes) {
+        using BoundedResponse response = await BoundedHttpContent.GetAsync(http, path, maxBytes).ConfigureAwait(false);
+        EnsureSuccess(response.Response, response.Body.ToText());
+
+        return response.Body;
     }
 
     private static HttpClient CreateHttpClient() {

@@ -1,3 +1,5 @@
+using CloudyWing.McpLab.Shared.DotEnv;
+
 namespace CloudyWing.McpLab.Mailpit;
 
 /// <summary>
@@ -13,13 +15,22 @@ public sealed class MailpitTools {
     private const int MaxWaitTimeoutSeconds = 60;
     private static readonly TimeSpan PollDelay = TimeSpan.FromMilliseconds(500);
     private readonly ConnectionRegistry registry;
+    private readonly IDotEnvSnapshotProvider snapshotProvider;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MailpitTools"/> with the connection registry.
     /// </summary>
-    public MailpitTools(ConnectionRegistry registry) {
+    /// <param name="registry">The connection registry.</param>
+    /// <param name="snapshotProvider">The .env snapshot provider used to read MCPLAB_MAX_RESPONSE_BYTES.</param>
+    public MailpitTools(ConnectionRegistry registry, IDotEnvSnapshotProvider snapshotProvider) {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(snapshotProvider);
+
         this.registry = registry;
+        this.snapshotProvider = snapshotProvider;
     }
+
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
 
     /// <summary>
     /// Lists all configured Mailpit connections.
@@ -209,18 +220,14 @@ public sealed class MailpitTools {
                 MaxSourceLimit
             );
             using HttpClient http = registry.CreateClient(connection);
-            string source = await GetStringAsync(
+            int maxBytes = MaxResponseBytes;
+            BoundedBody body = await GetBoundedAsync(
                 http,
-                $"api/v1/message/{Uri.EscapeDataString(id)}/raw"
+                $"api/v1/message/{Uri.EscapeDataString(id)}/raw",
+                maxBytes
             ).ConfigureAwait(false);
 
-            return ToolResponse.Ok(new {
-                id,
-                limit = safeLimit,
-                source_length = source.Length,
-                truncated = source.Length > safeLimit,
-                source = LimitText(source, safeLimit),
-            });
+            return MailpitSourceFormatter.Format(id, safeLimit, body, maxBytes);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -229,7 +236,7 @@ public sealed class MailpitTools {
     private static int NormalizeListLimit(int limit) =>
         ToolRuntimeOptions.NormalizeRequestedInt32(limit, DefaultListLimit, 1, MaxListLimit);
 
-    private static async Task<JsonObject> GetMessagesAsync(
+    private async Task<JsonObject> GetMessagesAsync(
         HttpClient http,
         string path,
         int start,
@@ -239,26 +246,28 @@ public sealed class MailpitTools {
         return await GetJsonObjectAsync(http, $"{path}{separator}start={start}&limit={limit}").ConfigureAwait(false);
     }
 
-    private static async Task<JsonObject> GetJsonObjectAsync(HttpClient http, string path) {
-        string body = await GetStringAsync(http, path).ConfigureAwait(false);
+    private async Task<JsonObject> GetJsonObjectAsync(HttpClient http, string path) {
+        int maxBytes = MaxResponseBytes;
+        BoundedBody body = await GetBoundedAsync(http, path, maxBytes).ConfigureAwait(false);
 
-        return JsonNode.Parse(body)?.AsObject()
+        // A JSON document cut at the limit cannot be summarized, so exceeding it is an error.
+        return JsonNode.Parse(body.RequireComplete(maxBytes))?.AsObject()
             ?? throw new InvalidOperationException("Mailpit returned an invalid JSON object.");
     }
 
-    private static async Task<string> GetStringAsync(HttpClient http, string path) {
-        using HttpResponseMessage response = await http.GetAsync(path).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    private static async Task<BoundedBody> GetBoundedAsync(HttpClient http, string path, int maxBytes) {
+        using BoundedResponse response = await BoundedHttpContent.GetAsync(http, path, maxBytes).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode) {
-            string message = string.IsNullOrWhiteSpace(body)
-                ? $"{(int)response.StatusCode} {response.StatusCode}"
-                : body;
+            string text = response.Body.ToText();
+            string message = string.IsNullOrWhiteSpace(text)
+                ? $"{(int)response.Response.StatusCode} {response.Response.StatusCode}"
+                : text;
 
             throw new InvalidOperationException($"Mailpit returned {message}");
         }
 
-        return body;
+        return response.Body;
     }
 
     private static string CreateMessagesResponse(JsonObject result, int start, int limit) {
@@ -321,9 +330,6 @@ public sealed class MailpitTools {
 
         return arr.Select(item => item?.ToString() ?? "").ToArray();
     }
-
-    private static string LimitText(string value, int limit) =>
-        value.Length <= limit ? value : value[..limit];
 
     private static string GetString(JsonNode? node, string property) =>
         node?[property]?.ToString() ?? "";

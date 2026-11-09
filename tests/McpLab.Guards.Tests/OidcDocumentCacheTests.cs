@@ -1,5 +1,6 @@
 using System.Net;
 using CloudyWing.McpLab.Oidc;
+using CloudyWing.McpLab.Shared;
 using CloudyWing.McpLab.Shared.DotEnv;
 using Microsoft.IdentityModel.Tokens;
 using NSubstitute;
@@ -65,15 +66,72 @@ internal sealed class OidcDocumentCacheTests {
         });
     }
 
+    [Test]
+    public async Task GetJsonWebKeysAsync_BodyOverLimit_ThrowsAndDoesNotCache() {
+        CountingHandler handler = new();
+        IDotEnvSnapshotProvider snapshot = Substitute.For<IDotEnvSnapshotProvider>();
+        snapshot.Current.Returns(new Dictionary<string, string> { ["MCPLAB_MAX_RESPONSE_BYTES"] = "20" });
+        OidcDocumentClient client = CreateClientWithSnapshot(handler, snapshot);
+
+        ResponseTooLargeException? exception = Assert.ThrowsAsync<ResponseTooLargeException>(
+            async () => await client.GetJsonWebKeysAsync(Config())
+        );
+        int requestsAfterFailure = handler.Requests;
+        snapshot.Current.Returns(new Dictionary<string, string> { ["MCPLAB_MAX_RESPONSE_BYTES"] = "4096" });
+        IReadOnlyList<JsonWebKey> keys = await client.GetJsonWebKeysAsync(Config());
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(exception!.Message, Does.Contain("MCPLAB_MAX_RESPONSE_BYTES"));
+            Assert.That(exception.MaxResponseBytes, Is.EqualTo(20));
+            Assert.That(requestsAfterFailure, Is.EqualTo(1));
+            Assert.That(handler.Requests, Is.EqualTo(3), "failed discovery was not cached, so it is fetched again");
+            Assert.That(keys, Has.Count.EqualTo(1));
+        }
+    }
+
+    [Test]
+    public void GetDiscoveryDocumentAsync_ErrorStatus_ThrowsWithTruncatedBodyText() {
+        string body = new('e', 800);
+        IHttpClientFactory factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(Arg.Any<string>()).Returns(
+            _ => new HttpClient(new FixedHandler(HttpStatusCode.BadGateway, body), disposeHandler: false)
+        );
+        OidcDocumentClient client = new(factory);
+
+        InvalidOperationException? exception = Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.GetDiscoveryDocumentAsync(Config())
+        );
+
+        Assert.That(exception!.Message, Is.EqualTo($"OIDC metadata endpoint returned HTTP 502: {new string('e', 500)}"));
+    }
+
     private static ConnectionConfig Config() => new("idp", "http://idp", "http://idp/.well-known/openid-configuration", "", false);
 
     private static OidcDocumentClient CreateClient(CountingHandler handler, Dictionary<string, string> settings) {
-        IHttpClientFactory factory = Substitute.For<IHttpClientFactory>();
-        factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(handler, disposeHandler: false));
         IDotEnvSnapshotProvider snapshot = Substitute.For<IDotEnvSnapshotProvider>();
         snapshot.Current.Returns(settings);
 
+        return CreateClientWithSnapshot(handler, snapshot);
+    }
+
+    private static OidcDocumentClient CreateClientWithSnapshot(CountingHandler handler, IDotEnvSnapshotProvider snapshot) {
+        IHttpClientFactory factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(handler, disposeHandler: false));
+
         return new OidcDocumentClient(factory, snapshot);
+    }
+
+    private sealed class FixedHandler : HttpMessageHandler {
+        private readonly HttpStatusCode statusCode;
+        private readonly string body;
+
+        public FixedHandler(HttpStatusCode statusCode, string body) {
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(statusCode) { Content = new StringContent(body) });
     }
 
     private sealed class CountingHandler : HttpMessageHandler {

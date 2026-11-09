@@ -34,6 +34,84 @@ internal sealed class DockerLogStreamTests {
         Assert.That(actual, Is.EqualTo(Encoding.UTF8.GetString(bytes)));
     }
 
+    [Test]
+    public void Decode_PartialWithFrameCutInPayload_ReturnsAvailableBytes() {
+        byte[] complete = CreateFrame(1, "out\n");
+        byte[] cut = CreateFrame(2, "error line\n").Take(8 + 5).ToArray();
+        byte[] bytes = complete.Concat(cut).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo("out\nerror"));
+    }
+
+    [Test]
+    public void Decode_PartialWithFrameCutInHeader_ReturnsCompleteFramesOnly() {
+        byte[] complete = CreateFrame(1, "out\n");
+        byte[] cut = CreateFrame(2, "error line\n").Take(3).ToArray();
+        byte[] bytes = complete.Concat(cut).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo("out\n"));
+    }
+
+    [Test]
+    public void Decode_PartialWithFirstFrameCutInPayload_ReturnsAvailableBytes() {
+        byte[] bytes = CreateFrame(1, "first line\n").Take(8 + 5).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo("first"));
+    }
+
+    [Test]
+    public void Decode_PartialWithFirstHeaderCut_ReturnsEmptyText() {
+        byte[] bytes = CreateFrame(1, "first line\n").Take(5).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.Empty);
+    }
+
+    [Test]
+    public void Decode_PartialWithCompleteFrames_MatchesNonPartialResult() {
+        byte[] bytes = CreateFrame(1, "out\n").Concat(CreateFrame(2, "err\n")).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo(DockerLogStream.Decode(bytes)));
+    }
+
+    [Test]
+    public void Decode_PartialWithMultibyteCharacterCut_DropsIncompleteSequence() {
+        byte[] frame = CreateFrame(1, "中文");
+        byte[] bytes = frame.Take(frame.Length - 1).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo("中"));
+    }
+
+    [Test]
+    public void Decode_PartialRawTextCutInMultibyteCharacter_DropsIncompleteSequence() {
+        byte[] full = Encoding.UTF8.GetBytes("tty 中文");
+        byte[] bytes = full.Take(full.Length - 1).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: true);
+
+        Assert.That(actual, Is.EqualTo("tty 中"));
+    }
+
+    [Test]
+    public void Decode_NotPartialWithFrameCutInPayload_FallsBackToRawText() {
+        byte[] bytes = CreateFrame(1, "error line\n").Take(8 + 5).ToArray();
+
+        string actual = DockerLogStream.Decode(bytes, partial: false);
+
+        Assert.That(actual, Is.EqualTo(Encoding.UTF8.GetString(bytes)));
+    }
+
     private static byte[] CreateFrame(int streamType, string text) {
         byte[] payload = Encoding.UTF8.GetBytes(text);
         byte[] frame = new byte[8 + payload.Length];
