@@ -29,6 +29,8 @@ public sealed class SqlServerTools {
 
     private int MaxRows => ServiceSettings.SqlServer.MaxRows.Read(snapshotProvider.Current);
 
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
+
     /// <summary>
     /// 列出所有已設定的 SQL Server 連線
     /// </summary>
@@ -54,6 +56,7 @@ public sealed class SqlServerTools {
             query_timeout = QueryTimeout,
             max_rows = MaxRows,
             max_cell_chars = MaxCellChars,
+            max_response_bytes = MaxResponseBytes,
         });
 
     /// <summary>
@@ -243,7 +246,7 @@ public sealed class SqlServerTools {
             using SqlCommand cmd = new(sql, conn) { CommandTimeout = QueryTimeout };
             await using SqlDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-            return ToolResponse.Ok(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
+            return SqlResultSetReader.ToResponse(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
         } catch (InvalidOperationException ex) {
             return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
@@ -307,7 +310,7 @@ public sealed class SqlServerTools {
 
             if (upper.StartsWith("SELECT") || upper.StartsWith("WITH")) {
                 await using SqlDataReader rdr = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-                return ToolResponse.Ok(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
+                return SqlResultSetReader.ToResponse(await ReadResultSetAsync(rdr, cancellationToken).ConfigureAwait(false));
             }
 
             int affected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -323,5 +326,5 @@ public sealed class SqlServerTools {
     }
 
     private Task<object> ReadResultSetAsync(SqlDataReader rdr, CancellationToken cancellationToken) =>
-        SqlResultSetReader.ReadAsync(rdr, MaxRows, MaxCellChars, cancellationToken);
+        SqlResultSetReader.ReadAsync(rdr, MaxRows, MaxCellChars, MaxResponseBytes, cancellationToken);
 }

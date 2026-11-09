@@ -44,6 +44,7 @@ public sealed class RedisTools {
     public string ListRuntimeLimits() =>
         ToolResponse.Ok(new {
             max_rows = limits.KeyCount,
+            max_response_bytes = limits.MaxResponseBytes,
         });
 
     /// <summary>
@@ -109,28 +110,31 @@ public sealed class RedisTools {
             IDatabase db = mux.GetDatabase();
             RedisType type = await db.KeyTypeAsync(key);
             int max = limits.KeyCount;
+            int maxBytes = limits.MaxResponseBytes;
 
             if (type == RedisType.None) {
                 return ToolResponse.Empty("Key does not exist.");
             }
 
             if (type == RedisType.String) {
-                return ToolResponse.Ok(new {
+                (string text, long originalBytes, bool valueTruncated) = await RedisValueReader.ReadStringAsync(db, key, maxBytes);
+                var stringData = new {
                     key,
                     type = "string",
-                    value = (await db.StringGetAsync(key)).ToString() ?? "(nil)",
-                });
+                    value = text,
+                };
+
+                return valueTruncated
+                    ? ToolResponse.Ok(
+                        ResponseTruncation.Append(stringData, originalBytes, true, maxBytes),
+                        ResponseTruncation.Message(originalBytes, true, maxBytes)
+                    )
+                    : ToolResponse.Ok(stringData);
             }
 
-            (object value, long total, int returned) = type switch {
-                RedisType.List => await ReadListAsync(db, key, max),
-                RedisType.Set => await ReadSetAsync(db, key, max),
-                RedisType.SortedSet => await ReadSortedSetAsync(db, key, max),
-                RedisType.Hash => await ReadHashAsync(db, key, max),
-                _ => ((object)$"Unknown type: {type}", 0L, 0),
-            };
-
-            return ToolResponse.Ok(new {
+            ResponseBudget budget = new(maxBytes);
+            (object value, long total, int returned) = await RedisValueReader.ReadCollectionAsync(db, type, key, max, budget);
+            var data = new {
                 key,
                 type = type.ToString().ToLowerInvariant(),
                 value,
@@ -138,7 +142,14 @@ public sealed class RedisTools {
                 returned_count = returned,
                 truncated = total > returned,
                 max_items = max,
-            });
+            };
+
+            return budget.Exhausted
+                ? ToolResponse.Ok(
+                    ResponseTruncation.Append(data, budget),
+                    ResponseTruncation.Message(budget.ObservedBytes, false, budget.MaxBytes)
+                )
+                : ToolResponse.Ok(data);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -317,51 +328,5 @@ public sealed class RedisTools {
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
-    }
-
-    private static async Task<(object Value, long Total, int Returned)> ReadListAsync(IDatabase db, string key, int max) {
-        RedisValue[] items = await db.ListRangeAsync(key, 0, max - 1);
-        long total = await db.ListLengthAsync(key);
-
-        return (items.Select(v => v.ToString()).ToArray(), total, items.Length);
-    }
-
-    private static async Task<(object Value, long Total, int Returned)> ReadSetAsync(IDatabase db, string key, int max) {
-        List<string> items = [];
-
-        await foreach (RedisValue member in db.SetScanAsync(key, pageSize: max)) {
-            items.Add(member.ToString());
-
-            if (items.Count >= max) {
-                break;
-            }
-        }
-
-        long total = await db.SetLengthAsync(key);
-
-        return (items, total, items.Count);
-    }
-
-    private static async Task<(object Value, long Total, int Returned)> ReadSortedSetAsync(IDatabase db, string key, int max) {
-        SortedSetEntry[] items = await db.SortedSetRangeByRankWithScoresAsync(key, 0, max - 1);
-        long total = await db.SortedSetLengthAsync(key);
-
-        return (items.Select(e => new { member = e.Element.ToString(), score = e.Score }).ToArray(), total, items.Length);
-    }
-
-    private static async Task<(object Value, long Total, int Returned)> ReadHashAsync(IDatabase db, string key, int max) {
-        Dictionary<string, string> items = [];
-
-        await foreach (HashEntry entry in db.HashScanAsync(key, pageSize: max)) {
-            items[entry.Name.ToString()] = entry.Value.ToString();
-
-            if (items.Count >= max) {
-                break;
-            }
-        }
-
-        long total = await db.HashLengthAsync(key);
-
-        return (items, total, items.Count);
     }
 }

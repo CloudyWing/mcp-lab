@@ -24,6 +24,11 @@ public sealed class RedisToolLimits {
     public int KeyCount => ServiceSettings.Redis.MaxRows.Read(snapshotProvider.Current);
 
     /// <summary>
+    /// Gets the configured maximum content bytes of a single tool response.
+    /// </summary>
+    public int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
+
+    /// <summary>
     /// Normalizes the requested Redis key enumeration count.
     /// </summary>
     public int NormalizeKeyCount(int count) =>
