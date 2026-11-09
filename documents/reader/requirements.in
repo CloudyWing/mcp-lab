@@ -1,6 +1,6 @@
 # Direct dependencies of mcp-reader. requirements.txt is generated from this file:
 #   pip-compile --no-emit-index-url --strip-extras --output-file requirements.txt requirements.in
-mcp>=1.30,<2
+mcp>=2.3.0,<3
 uvicorn>=0.54,<1
 starlette>=1.10,<2
 sse-starlette>=3.6,<4
