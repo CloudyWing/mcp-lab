@@ -16,4 +16,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\shared\McpLab.Shared\McpLab.Shared.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HighMemoryPercent" Value="20" />
+  </ItemGroup>
 </Project>
