@@ -28,6 +28,8 @@ public sealed class ElasticTools {
 
     private int SearchSize => ServiceSettings.Elasticsearch.SearchSize.Read(snapshotProvider.Current);
 
+    private int MaxResponseBytes => ServiceSettings.Common.MaxResponseBytes.Read(snapshotProvider.Current);
+
     /// <summary>
     /// 列出所有已設定的 Elasticsearch 連線
     /// </summary>
@@ -45,6 +47,7 @@ public sealed class ElasticTools {
     public string ListRuntimeLimits() =>
         ToolResponse.Ok(new {
             search_size = SearchSize,
+            max_response_bytes = MaxResponseBytes,
         });
 
     /// <summary>
@@ -56,7 +59,7 @@ public sealed class ElasticTools {
     ) {
         try {
             using HttpClient http = registry.CreateClient(connection);
-            string body = await http.GetStringAsync("/");
+            string body = await GetCompleteTextAsync(http, "/");
             JsonNode? node = JsonNode.Parse(body);
             string name = node?["cluster_name"]?.ToString() ?? "";
             string ver = node?["version"]?["number"]?.ToString() ?? "";
@@ -79,7 +82,7 @@ public sealed class ElasticTools {
     ) {
         try {
             using HttpClient http = registry.CreateClient(connection);
-            string body = await http.GetStringAsync("/_cat/indices?format=json&s=index");
+            string body = await GetCompleteTextAsync(http, "/_cat/indices?format=json&s=index");
             JsonArray arr = JsonNode.Parse(body)?.AsArray() ?? [];
             List<object> indices = [];
 
@@ -109,7 +112,7 @@ public sealed class ElasticTools {
     ) {
         try {
             using HttpClient http = registry.CreateClient(connection);
-            string body = await http.GetStringAsync($"/{Uri.EscapeDataString(index)}/_mapping");
+            string body = await GetCompleteTextAsync(http, $"/{Uri.EscapeDataString(index)}/_mapping");
 
             return ToolResponse.Ok(JsonNode.Parse(body));
         } catch (Exception ex) {
@@ -126,7 +129,7 @@ public sealed class ElasticTools {
     ) {
         try {
             using HttpClient http = registry.CreateClient(connection);
-            string body = await http.GetStringAsync("/_cluster/health");
+            string body = await GetCompleteTextAsync(http, "/_cluster/health");
 
             return ToolResponse.Ok(JsonNode.Parse(body));
         } catch (Exception ex) {
@@ -183,37 +186,28 @@ public sealed class ElasticTools {
         string body = BuildQueryBody(queryBody);
 
         try {
+            int maxResponseBytes = MaxResponseBytes;
             using HttpClient http = registry.CreateClient(connection);
-            HttpResponseMessage resp = await http.PostAsync(
-                $"/{Uri.EscapeDataString(index)}/_search?size={safeSize}",
-                new StringContent(body, Encoding.UTF8, "application/json")
-            );
-            string responseBody = await resp.Content.ReadAsStringAsync();
+            using HttpRequestMessage request = new(HttpMethod.Post, $"/{Uri.EscapeDataString(index)}/_search?size={safeSize}") {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+            using BoundedResponse response = await BoundedHttpContent.SendAsync(http, request, maxResponseBytes);
 
-            if (!resp.IsSuccessStatusCode) {
+            if (!response.IsSuccessStatusCode) {
                 return ToolResponse.Error(
-                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
-                    ParseJsonOrText(responseBody)
+                    $"Elasticsearch returned {(int)response.Response.StatusCode} {response.Response.StatusCode}.",
+                    ToBodyData(response.Body, maxResponseBytes)
                 );
             }
 
-            JsonNode? root = JsonNode.Parse(responseBody);
-            string total = root?["hits"]?["total"]?["value"]?.ToString() ?? "0";
-            JsonArray hits = root?["hits"]?["hits"]?.AsArray() ?? [];
-            List<object> output = [];
+            object data = ElasticSearchResponseReader.Read(response.Body, maxResponseBytes);
 
-            foreach (JsonNode? hit in hits) {
-                output.Add(new {
-                    _id = hit?["_id"]?.ToString(),
-                    _score = hit?["_score"]?.ToString(),
-                    _source = hit?["_source"],
-                });
-            }
-
-            return ToolResponse.Ok(new {
-                total,
-                hits = output,
-            });
+            return response.Body.Truncated
+                ? ToolResponse.Ok(
+                    data,
+                    ResponseTruncation.Message(response.Body.OriginalBytes, response.Body.OriginalBytesExact, maxResponseBytes)
+                )
+                : ToolResponse.Ok(data);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -270,17 +264,11 @@ public sealed class ElasticTools {
                 ? $"/{Uri.EscapeDataString(index)}/_doc"
                 : $"/{Uri.EscapeDataString(index)}/_doc/{Uri.EscapeDataString(id)}";
             HttpMethod method = string.IsNullOrWhiteSpace(id) ? HttpMethod.Post : HttpMethod.Put;
-            HttpResponseMessage resp = await http.SendAsync(new HttpRequestMessage(method, url) {
+            using HttpRequestMessage request = new(method, url) {
                 Content = new StringContent(document, Encoding.UTF8, "application/json"),
-            });
-            string body = await resp.Content.ReadAsStringAsync();
+            };
 
-            return resp.IsSuccessStatusCode
-                ? ToolResponse.Ok(ParseJsonOrText(body), "Document indexed.")
-                : ToolResponse.Error(
-                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
-                    ParseJsonOrText(body)
-                );
+            return await SendWriteAsync(http, request, "Document indexed.");
         } catch (JsonException) {
             return ToolResponse.Error("Invalid JSON document.");
         } catch (Exception ex) {
@@ -303,16 +291,12 @@ public sealed class ElasticTools {
 
         try {
             using HttpClient http = registry.CreateClient(connection);
-            HttpResponseMessage resp = await http.DeleteAsync(
-                $"/{Uri.EscapeDataString(index)}/_doc/{Uri.EscapeDataString(id)}");
-            string body = await resp.Content.ReadAsStringAsync();
+            using HttpRequestMessage request = new(
+                HttpMethod.Delete,
+                $"/{Uri.EscapeDataString(index)}/_doc/{Uri.EscapeDataString(id)}"
+            );
 
-            return resp.IsSuccessStatusCode
-                ? ToolResponse.Ok(ParseJsonOrText(body), "Document deleted.")
-                : ToolResponse.Error(
-                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
-                    ParseJsonOrText(body)
-                );
+            return await SendWriteAsync(http, request, "Document deleted.");
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
@@ -365,22 +349,46 @@ public sealed class ElasticTools {
             ElasticGuard.ValidateSingleIndex(index, "DeleteByQuery");
             ElasticGuard.ValidateQueryBody(queryBody, "DeleteByQuery");
             using HttpClient http = registry.CreateClient(connection);
-            HttpResponseMessage resp = await http.PostAsync(
-                $"/{Uri.EscapeDataString(index)}/_delete_by_query",
-                new StringContent(queryBody, Encoding.UTF8, "application/json"));
-            string body = await resp.Content.ReadAsStringAsync();
+            using HttpRequestMessage request = new(HttpMethod.Post, $"/{Uri.EscapeDataString(index)}/_delete_by_query") {
+                Content = new StringContent(queryBody, Encoding.UTF8, "application/json"),
+            };
 
-            return resp.IsSuccessStatusCode
-                ? ToolResponse.Ok(ParseJsonOrText(body), "Delete by query completed.")
-                : ToolResponse.Error(
-                    $"Elasticsearch returned {(int)resp.StatusCode} {resp.StatusCode}.",
-                    ParseJsonOrText(body)
-                );
+            return await SendWriteAsync(http, request, "Delete by query completed.");
         } catch (InvalidOperationException ex) {
             return ToolResponse.Blocked(ex.Message);
         } catch (Exception ex) {
             return ToolResponse.Error(ex);
         }
+    }
+
+    private async Task<string> GetCompleteTextAsync(HttpClient http, string path) {
+        int maxResponseBytes = MaxResponseBytes;
+        using BoundedResponse response = await BoundedHttpContent.GetAsync(http, path, maxResponseBytes);
+        response.Response.EnsureSuccessStatusCode();
+
+        return response.Body.RequireComplete(maxResponseBytes);
+    }
+
+    // 寫入操作已送出，回應本文被截斷時仍依原狀態碼回報，不轉成錯誤。
+    private async Task<string> SendWriteAsync(HttpClient http, HttpRequestMessage request, string successMessage) {
+        int maxResponseBytes = MaxResponseBytes;
+        using BoundedResponse response = await BoundedHttpContent.SendAsync(http, request, maxResponseBytes);
+        object? data = ToBodyData(response.Body, maxResponseBytes);
+
+        return response.IsSuccessStatusCode
+            ? ToolResponse.Ok(data, successMessage)
+            : ToolResponse.Error(
+                $"Elasticsearch returned {(int)response.Response.StatusCode} {response.Response.StatusCode}.",
+                data
+            );
+    }
+
+    private static object? ToBodyData(BoundedBody body, int maxResponseBytes) {
+        object? parsed = ParseJsonOrText(body.ToText());
+
+        return body.Truncated
+            ? ResponseTruncation.Append(new { partial_body = parsed }, body, maxResponseBytes)
+            : parsed;
     }
 
     private static string BuildQueryBody(string queryBody) {
