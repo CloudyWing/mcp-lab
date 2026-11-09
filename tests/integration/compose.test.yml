@@ -16,7 +16,7 @@ services:
       - shared_net
 
   test-es:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.6
     environment:
       discovery.type: single-node
       xpack.security.enabled: "true"
