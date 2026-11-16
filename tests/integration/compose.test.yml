@@ -90,7 +90,7 @@ services:
 
   # Serves an OpenAPI spec for mcp-api-contract and discovery/JWKS documents for mcp-oidc.
   test-api:
-    image: python:3.12-slim
+    image: python:3.15-slim
     command: ["python", "-u", "/app/fake_api.py"]
     volumes:
       - ./tests/integration/fake_api.py:/app/fake_api.py:ro
